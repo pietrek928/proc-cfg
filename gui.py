@@ -5,77 +5,55 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
 from gi.repository.GdkPixbuf import Pixbuf
 from gi.repository.Gdk import color_parse
+import xml.etree.ElementTree as Et
+
+ld_base = {
+    's': str,
+    'i': int,
+    'f': float,
+    'b': bool
+}
+ld_base_r = dict( tuple(reversed(i))
+                for i in ld_base.items() )
+
+def store_obj( e, o ):
+    t = type(o)
+    if t in ld_base_r:
+        e.attrib[ 't' ] = ld_base_r[t]
+        e.attrib[ 'v' ] = str( o )
+    else:
+        try:
+            o.xml_store( e )
+        except KeyError:
+            pass
+
+
+def flush_children( o ):
+    for i in o.get_children():
+        o.remove( i )
 
 class xml_storable:
-    def store_array( s, e, a ):
-        e.attrib[ 't' ] = 'xml_array'
-        for i in a:
-            ee = Et.SubElement( e, 'a' )
-            s.store_obj( ee, i )
-
-    def load_array( s, e ):
-        return [ s.load_obj(ee)
-                for ee in e.findall( 'a' ) ]
-
-    def store_dict( s, e, a ):
-        e.attrib[ 't' ] = 'xml_dict'
-        for n,i in a.items():
-            ee = Et.SubElement( e, n )
-            s.store_obj( ee, i )
-
-    def load_dict( s, e ):
-        return { ee.tag:s.load_obj(ee)
-                for ee in e }
-
-
-    def store_obj( s, e, o ):
-        if type(i) in ( str, int ):
-            e.attrib[ 'v' ] = str( i )
-        elif type(o) in ( list, tuple ):
-            e.attrib[ 't' ] = 'xml_array'
-            s.store_array( e, o )
-        elif type(o) in ( dict ):
-            e.attrib[ 't' ] = 'xml_dict'
-            s.store_dict( e, o )
-        else:
-            try:
-                o.xml_store( e )
-            except KeyError:
-                pass
-
-    def load_obj( s, e ):
+    def load_obj( s, e, cm ):
         t = e.get('t')
-        if t is None:
-            try:
-                r = ee.attrib['v']
-                r = int( v )
-            except ValueError:
-                pass
+        if t in ld_base:
+            return ld_base[t]( ee.attrib['v'] )
+        else:
+            r = cm.get(t)().xml_load( e, cl )
+            r._p = s
             return r
-        elif t == 'xml_array':
-            return s.load_array( e )
-        elif t == 'xml_dict':
-            return s.load_dict( e )
-        else: # TODO: where to look for classes ?
-            return globals()[t]().xml_load( e )
 
     def xml_store( s, e ):
-        e.attrib[ 't' ] = s.;
+        e.attrib[ 't' ] = type(s).__name__;
         for n,v in s.__dict__.items():
             if not n.startswith('_'):
                 ee = Et.SubElement( e, n )
-                s.store_obj( ee, v )
-    def xml_load( s, e ):
+                store_obj( ee, v )
+    def xml_load( s, e, cm ):
+        for n,i in e.attrib.items():
+            setattr( s, n, str(i) )
         for ee in e:
-            setattr( s, ee.tag, s.load_obj( ee ) )
+            setattr( s, ee.tag, s.load_obj( ee, cm ) )
         return s
-
-
-def change_list_cb( cb, o, n, parent_obj=None ):
-    model = cb.get_model()
-    index = cb.get_active()
-    setattr( o, n, model[index][-1] )
-    if not (parent_obj==None): parent_obj.update_all()
 
 def activate_func_cb( e, o ):
     if not e.get_expanded():
@@ -112,53 +90,41 @@ def cnv_num( n ):
 
 class link_path:
     def get( s, l ):
-        o = s
         for i in l.split( '/' ):
             if i.startswith( '.' ):
                 if i == '..':
-                    o = o.p
+                    s = s._p
                 elif i == '...':
-                    o = o.cfg
+                    s = s.cfg
                 #elif i == '.$':
                 else:
                     raise ValueError( 'invalid path command: \'%s\'' % str(i) )
             else:
-                o = getattr( o, i )
+                s = getattr( s, i )
+        return s
 
-    def go( s, t ):
-        o = s
-        for i in t:
-            if i.startswith( '.' ):
-                if i == '..':
-                    o = o.p
-                elif i == '...':
-                    o = o.get_cfg()
-                #elif i == '.$':
-                else:
-                    raise ValueError( 'invalid path command: \'%s\'' % str(i) )
-            else:
-                o = getattr( o, i )
     def unlink( s, l ):
         t = l.split('/')
-        o = s.go( t[:-1] )
-        v = getattr( o, t[-1] )
+        o = s.get( t[:-1] )
+        n = t[-1]
         try:
-            v.remove()
+            getattr( o, n ).remove()
         except AttributeError:
             pass
-        delattr( o, t[-1] )
+        delattr( o, n )
 
     def set( s, l, v ):
         t = l.split('/')
-        o = s.go( t[:-1] )
+        o = s.get( t[:-1] )
+        n = t[-1]
         try:
-            getattr( o, t[-1] ).remove()
+            getattr( o, n ).remove()
         except AttributeError:
             pass
-        setattr( o, t[-1], v )
+        setattr( o, n, v )
 
     def get_obj_list( s, t ):
-        o = s.p
+        o = s._p
         o = s.get()
         r = []
         for n,i in o.__dict__.items():
@@ -169,24 +135,41 @@ class link_path:
 class config_descr:
     def __init__( s, d, tt, ff=[] ):
         s.d = d
-        s.tt = tt
+        s.tt = [ input_descr( *i ) for i in tt ]
         s.ff = ff
+
+class input_descr( xml_storable ):
+    def __init__( s, n, vd, fv, sl, update=False, pdescr=None ):
+        s.n = n
+        s.vd = vd
+        s.fv = fv
+        s.sl = sl
+        if update: s.update = update
+        if pdescr: s.pdescr = pdescr
+
+    def up( s ):
+        return ( hasattr(s,'update') and s.update )
+
+def change_list_cb( cb, s, n, ucb=None ):
+    model = cb.get_model()
+    index = cb.get_active()
+    setattr( s, n, model[index][-1] )
+    if ucb: ucb()
 
 # o: object that contains variable
 # n: variable name
 # f: option list, tuple: ( descr, value )
-# parent_obj: object that receives change event
-def gen_combo( o, n, f, parent_obj=None ):
+# ucb: update callback on change
+def gen_combo( o, n, f, ucb=None ):
     ee = f[0]
     ii = 0
     _ii = 0
-    vv = None
-    if hasattr(o,n): vv=getattr(o,n)
+    vv=getattr( o, n, None )
     if isinstance( ee, tuple ):
         names = Gtk.ListStore( type(ee[0]), type(ee[1]) )
         for a in f:
-            names.append( [ a[0], a[1] ] )
-            if a[0] == vv: ii=_ii
+            names.append( list( a ) )
+            if a[-1] == vv: ii=_ii
             _ii+=1
         ee = ee[1]
     else:
@@ -201,7 +184,7 @@ def gen_combo( o, n, f, parent_obj=None ):
     r = Gtk.CellRendererText()
     cb.pack_start(r, True)
     cb.add_attribute( r, 'text', 0 )
-    cb.connect("changed", change_list_cb, o, n, parent_obj)
+    cb.connect("changed", change_list_cb, o, n, ucb)
     return cb
 
 def gen_proc_view( t ):
@@ -265,10 +248,11 @@ class config_parent( link_path, xml_storable ):
         return s.descr_short()
 
     def update_all( s ):
-        if hasattr( s, 'update_val' ): s.update_val()
+        if hasattr( s, 'update' ): s.update()
         if s.editing():
-            b = s.show( )
-            b.show_all()
+            flush_children( s._pb )
+            pb = s._pb
+            s.show( pb )
 
     def editing( s ):
         return hasattr( s, '_pb' )
@@ -278,9 +262,7 @@ class config_parent( link_path, xml_storable ):
 
     def rollup( s ):
         if hasattr( s, '_pb' ):
-            pb = s._pb
-            for c in pb.get_children():
-                pb.remove( c )
+            del s._pb
 
     def show_window( s ):
         w = Gtk.Window()
@@ -293,7 +275,7 @@ class config_parent( link_path, xml_storable ):
         try:
             getattr( s, n ).remove()
             delattr( s, n )
-        except KeyError,AttributeError:
+        except ( KeyError, AttributeError ):
             pass
 
     def remove( s ): #TODO: list ?
@@ -315,20 +297,6 @@ class config_parent( link_path, xml_storable ):
 # TODO: configure children ? hide ?
         s.cfg_name = cfg_name # TODO: check differences, update
         return s.get_cfg( 'import_cfg' )( cfg_name );
-"        for i in cd.tt:
-            f = i.fv
-            n = i.n
-            if hasattr( cc, n ):
-                tt = type( vv )
-                if tt in ( int, str ):
-                    setattr( s, n, vv )
-                else:
-                    setattr( s, n, tt.cset(vv) )
-            else:
-                try:
-                    delattr( s, n )
-                except AttributeError:
-                    pass #"
 
     def parent_set_cb( s, c, p ):
         if not c.get_parent():
@@ -340,19 +308,19 @@ class config_parent( link_path, xml_storable ):
     def descr_short( s ):
         r = ''
         for i in s.__dict__.items():
-            if hasattr( i, 'descr_line' )
+            if hasattr( i, 'descr_line' ):
                 r += e.descr_line()
                 r += '\n'
         return r
 
-    def show( s ): #TODO: box instead of window ?
-        if s.editing():
-            s.rollup()
-        else:
-            s._pb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            s._pb.connect( 'parent-set', s.parent_set_cb )
-        pb = s._pb
-        cd = s.get_descr_class()
+    def show( s, pb=None ):
+        s.rollup()
+        if not pb:
+            pb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            pb.connect( 'parent-set', s.parent_set_cb )
+        s._pb = pb
+        cd = s.descr
+        ucb = s.update_all
         for i in cd.tt:
             n = i.n
             u = not i.sl
@@ -367,24 +335,18 @@ class config_parent( link_path, xml_storable ):
                 pb.add( b )
                 b.add( Gtk.Label( i.vd ) )
                 f = i.fv
-                if isinstance( f, list ):
-                    b.add( gen_combo( s, n, f, parent_obj=( s if i.up() else None ) ) )
+                if isinstance( f, tuple ):
+                    b.add( gen_combo( s, n, f, ucb=( s.update_all if i.up() else None ) ) )
                 elif isinstance( f, str ):
-                    if f == 'func':
-                        b_en = Gtk.CheckButton( 'en' )
-                        b.add( b_en )
-                        if hasattr( s, n ):
-                            b_en.set_active( True )
-                            cb = Gtk.CheckButton( 'volatile' )
-                            cb.connect('clicked', s.check_func_cb, n, 'volatile')
-                            b.add( cb )
-                        b_en.connect('clicked', s.check_func_cb, n, 'en')
-                    elif f == 'bool':
-                        pass
+                    pass
                 else:
-                    if not hasattr( f, n ):
-                        setattr( f, n, f.cfg() )
-                    f.disp( s, n, b )
+                    d = getattr( s, n, None )
+                    if not d:
+                        d = f.obj()
+                        d._p = s
+                        setattr( s, n, d )
+                    l = f.disp( d, ucb )
+                    for c in l: b.add( c )
             elif hasattr( s, n ): delattr( s, n )
         if hasattr( cd, 'tiles' ) and cd.tiles:
             il = Gtk.ListStore( Pixbuf, str, object )
@@ -405,60 +367,61 @@ class config_parent( link_path, xml_storable ):
                     e = Gtk.Expander( label=i.get_val( 'name', i.n ) )
                     e.connect( 'activate', activate_func_cb, i ) # TODO: method from class
                     pb.add( e )
+        pb.show_all()
         return pb
 
     def tree_node( s, t, p ):
         tn = t.append( p, [ i.n, s ] ) # TODO: icon
-        s.tree_node = tn
+        s._tn = tn
 
 class freq( xml_storable ):
-    def __init__( s):
-        pass
-    def disp( s, o, n, b ):
-        if not hasattr( o, n ): setattr( o, n, freq_cfg() )
-        fo = getattr( o, n )
-        fo.update( o, s.l )
-        b.add( Gtk.Label( 'X' ) )
-        if isinstance( s.mul, list ):
-            b.add( gen_combo( fo, 'mul', s.mul, o ) )
-        b.add( Gtk.Label( '/' ) )
-        if isinstance( f.div, list ):
-            b.add( gen_combo( fo, 'div', s.div, o ) )
-        b.add( Gtk.Label( '= '+cnv_num( fo.freq )+'Hz' ) )
-    def update( s, o, l ):
-        src_freq = float( o.get(l) )
-        s.freq = src_freq*float(s.mul)/float(s.div)
+    def __init__( s ):
+        s.mul = 1
+        s.div = 1
+    def update( s ):
+        src_freq = s._p.get(s.l)
+        s.freq = float(src_freq)*float(s.mul)/float(s.div)
 
-class input( xml_storable ):
-    def __init__( s, n, vd, fv, sl, update=False, pdescr=None ):
-        s.n = n
-        s.vd = vd
-        s.fv = fv
-        s.sl = sl
-        if update: s.update = update
-        if pdescr: s.pdescr = pdescr
-
-    def up( s ):
-        return ( hasattr(s,'update') and s.update )
-
+class freq_setup:
+    def __init__( s, l, mul, div=() ):
+        s.__dict__.update(locals())
+        del s.s
+    def obj( s ):
+        r = freq()
+        r.l = s.l
+        return r
+    def disp( s, fo, cb ):
+        r = [ Gtk.Label( 'X' ) ]
+        if isinstance( s.mul, tuple ):
+            r.append( gen_combo( fo, 'mul', s.mul, cb ) )
+        r.append( Gtk.Label( '/' ) )
+        if isinstance( s.div, tuple ):
+            r.append( gen_combo( fo, 'div', s.div, cb ) )
+        fo.update()
+        r.append( Gtk.Label( '= '+cnv_num( fo.freq )+'Hz' ) )
+        return r
 
 class func( xml_storable ):
     def __init__( s ):
         s.en = False
-    def update_cb( s, cb, o, nc ):
+    def update_cb( s, cb, nc, ucb=None ):
         v = cb.get_active()
         setattr( s, nc, v )
-        if nc == 'en':
-            o.update_all()
-    def disp( s, o, n, b ):
+        if ucb: ucb()
+
+class func_setup:
+    def obj( s ):
+        return func()
+    def disp( s, fo, cb ):
         b_en = Gtk.CheckButton( 'en' )
-        b.add( b_en )
-        if hasattr( s, n ):
+        r = [ b_en ]
+        if fo.en:
             b_en.set_active( True )
-            cb = Gtk.CheckButton( 'volatile' )
-            cb.connect('clicked', getattr( o, n ).update_cb, o, 'volatile')
-            b.add( cb )
-        b_en.connect('clicked', getattr( o, n ).update_cb, o, 'en')
+            bt = Gtk.CheckButton( 'volatile' )
+            bt.connect('clicked', fo.update_cb, 'volatile')
+            r.append( bt )
+        b_en.connect('clicked', fo.update_cb, 'en', fo._p.update_all)
+        return r
 
 class objsel( xml_storable ):
     def __init__( s ):
