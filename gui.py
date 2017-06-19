@@ -100,7 +100,7 @@ class link_path:
                 else:
                     raise ValueError( 'invalid path command: \'%s\'' % str(i) )
             else:
-                s = getattr( s, i )
+                s = getattr( s, i ) # TODO: link check here ?
         return s
 
     def unlink( s, l ):
@@ -423,22 +423,29 @@ class func_setup:
         b_en.connect('clicked', fo.update_cb, 'en', fo._p.update_all)
         return r
 
-class objsel( xml_storable ):
+class link( link_path, xml_storable ):
     def __init__( s ):
-        pass
+        s.l = ''
+    def link( s ):
+        return s._p.get( s.l )
     def setup_obj( s, btn ): # TODO: handle error, show result ?
         o = s._p
         o.get( s.path+'/'+s.n ).load_cfg( s.cn )
         o.update_all()
     def gen_setup( s ):
-        o = s._p.get( s.path+'/'+s.n )
+        o = s._p.get( s.l )
         if hasattr( o, 'gen_setup' ):
             o.gen_setup()
-    def disp( s, o, n, b ):
+
+class objsel_setup:
+    def __init__( s, ):
+        s.__dict__.update(locals())
+        del s.s
+    def disp( s, fo, cb ):
         bb =  Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         b.add( bb )
         b = bb
-        sel_o = o.get( s.path )
+        sel_o = fo._p.get( fo.l )
         l = []
         for n,i in sel_o.__dict__.items():
             if isinstance( i, s.sc ) and not n.startswith( '_' ):

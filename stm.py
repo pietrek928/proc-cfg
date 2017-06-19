@@ -115,8 +115,8 @@ class gpio_pin( gui.config_parent ):
             ( 'spd', 'Output speed', ( ('2MHz',2), ('10MHz',1), ('50MHz',3) ), { 'm':('afio','out') } ),
             ( 'in_mode', 'Input mode', ('up','down','analog','floating'), { 'm':('in') } ),
             ( 'val', 'Get value', gui.func_setup(), { 'm':('afio','in') } ),
-#            ( 'set', 'Set high', gui.func_setup(), { 'm':('afio','out') } ),
-            ( 'reset', 'Set low', gui.func_setup(), { 'm':('afio','out') } ),
+            ( 'vset', 'Set high', gui.func_setup(), { 'm':('afio','out') } ),
+            ( 'vreset', 'Set low', gui.func_setup(), { 'm':('afio','out') } ),
             ( 'test_freq', 'Test freq', gui.freq_setup( 'test_freq2', (1, 2, 3), (1, 2, 3) ), { 'm':('afio','out') } ),
         ],
     )
