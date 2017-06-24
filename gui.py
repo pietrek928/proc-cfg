@@ -23,6 +23,7 @@ def store_obj( e, o ):
         e.attrib[ 'v' ] = str( o )
     else:
         try:
+            e.attrib[ 't' ] = type(o).__name__;
             o.xml_store( e )
         except KeyError:
             pass
@@ -43,7 +44,6 @@ class xml_storable:
             return r
 
     def xml_store( s, e ):
-        e.attrib[ 't' ] = type(s).__name__;
         for n,v in s.__dict__.items():
             if not n.startswith('_'):
                 ee = Et.SubElement( e, n )
@@ -55,19 +55,9 @@ class xml_storable:
             setattr( s, ee.tag, s.load_obj( ee, cm ) )
         return s
 
-def activate_func_cb( e, o ):
-    if not e.get_expanded():
-        if not o.editing():
-            e.add( o.show() )
-            e.show_all()
-    else:
-        for i in e.get_children():
-            if isinstance( i, Gtk.Box ):
-                e.remove( i )
-
-def query_tooltip_func_cb( iv, x, y, kbd, tp, o ):
+def iconview_tp_cb( iv, x, y, kbd, tp ):
     pp = iv.get_path_at_pos( x, y )
-    if pp is None: return False
+    if pp is None: return False # may be 0
     m = iv.get_model()
     e = m.get_value( m.get_iter( pp ), 2 )
     tp.set_text( e.get_tooltip() )
@@ -76,6 +66,12 @@ def query_tooltip_func_cb( iv, x, y, kbd, tp, o ):
     #iv = o.iv
     #for (i,pp) in o.tooltip_tab:
         #iv.set_tooltip_cell( i, pp )
+
+def iconview_ac_cb( iv, p ):
+    m = iv.get_model()
+    e = m.get_value( m.get_iter( p ), 2 )
+    e.show_window()
+    return True
 
 def cnv_num( n ):
     n = float( n )
@@ -88,20 +84,30 @@ def cnv_num( n ):
     else: nn='{:.4f}'.format(n)
     return nn+k
 
+link_func = {
+        '.': lambda o: o,
+        '..': lambda o: o._p,
+        '...': lambda o: o.go_proc()
+}
+
 class link_path:
     def get( s, l ):
-        for i in l.split( '/' ):
-            if i.startswith( '.' ):
-                if i == '..':
-                    s = s._p
-                elif i == '...':
-                    s = s.cfg
-                #elif i == '.$':
+        try:
+            for i in l.split( '/' ):
+                if i.startswith( '.' ):
+                    try: # TODO: nop default ?
+                        s = link_func[i]( s )
+                    except AttributeError:
+                        raise NotImplementedError( 'no path command: \'%s\'' % str(i) )
                 else:
-                    raise ValueError( 'invalid path command: \'%s\'' % str(i) )
-            else:
-                s = getattr( s, i ) # TODO: link check here ?
-        return s
+                    try:
+                        s = getattr( s, i )
+                    except AttributeError: # TODO: cut recursion, better error
+                        if s._l:
+                            s = s._p.get( s._l )
+            return s
+        except AttributeError:
+            raise LookupError( 'no path \'%s\'' % l )
 
     def unlink( s, l ):
         t = l.split('/')
@@ -110,7 +116,7 @@ class link_path:
         try:
             getattr( o, n ).remove()
         except AttributeError:
-            pass
+            raise
         delattr( o, n )
 
     def set( s, l, v ):
@@ -120,7 +126,7 @@ class link_path:
         try:
             getattr( o, n ).remove()
         except AttributeError:
-            pass
+            pass # TODO: warning
         setattr( o, n, v )
 
     def get_obj_list( s, t ):
@@ -161,6 +167,7 @@ def change_list_cb( cb, s, n, ucb=None ):
 # f: option list, tuple: ( descr, value )
 # ucb: update callback on change
 def gen_combo( o, n, f, ucb=None ):
+    if not f: return Gtk.Box()
     ee = f[0]
     ii = 0
     _ii = 0
@@ -218,10 +225,7 @@ def gen_proc_view( t ):
 
 class config_parent( link_path, xml_storable ):
     def get_icon( s ):
-        if hasattr( s, 'icon' ): return s.icon
-        cd = s.get_descr_class()
-        if hasattr( cd, 'icon' ): return cd.icon
-        return 'edit-copy'
+        return getattr( s, 'icon', 'edit-copy' )
 
     def get_val( s, n, default ):
         if hasattr( s, n ): return getattr( s, n )
@@ -302,6 +306,17 @@ class config_parent( link_path, xml_storable ):
         if not c.get_parent():
             s.close()
 
+    def expander_cb( s, e ):
+        if not e.get_expanded():
+            if not s.editing():
+                e.add( s.show() )
+                e.show_all()
+        else:
+            #flush_children( e )
+            for i in e.get_children():
+                if isinstance( i, Gtk.Box ):
+                    e.remove( i )
+
     def hasopt( s, n ):
         return hasattr( s, n ) and getattr( s, n )
 
@@ -348,7 +363,7 @@ class config_parent( link_path, xml_storable ):
                     l = f.disp( d, ucb )
                     for c in l: b.add( c )
             elif hasattr( s, n ): delattr( s, n )
-        if hasattr( cd, 'tiles' ) and cd.tiles:
+        if s.hasopt('tiles'):
             il = Gtk.ListStore( Pixbuf, str, object )
             iv = Gtk.IconView()
             iv.set_model( il )
@@ -359,13 +374,14 @@ class config_parent( link_path, xml_storable ):
                     pixbuf = Gtk.IconTheme.get_default().load_icon(i.get_icon(), 64, 0)
                     pp = il.get_path( il.append([pixbuf, i.n, i ]) )
             iv.set_property( 'has-tooltip', True )
-            iv.connect( 'query-tooltip', query_tooltip_func_cb, s ) # TODO: method from class
+            iv.connect( 'query-tooltip', iconview_tp_cb ) # TODO: method from class
+            iv.connect( 'item-activated', iconview_ac_cb )
             pb.add( iv )
         else:
             for n,i in s.__dict__.items():
                 if isinstance( i, config_parent ):
                     e = Gtk.Expander( label=i.get_val( 'name', i.n ) )
-                    e.connect( 'activate', activate_func_cb, i ) # TODO: method from class
+                    e.connect( 'activate', i.expander_cb )
                     pb.add( e )
         pb.show_all()
         return pb
@@ -423,42 +439,55 @@ class func_setup:
         b_en.connect('clicked', fo.update_cb, 'en', fo._p.update_all)
         return r
 
-class link( link_path, xml_storable ):
+class link( link_path ):
     def __init__( s ):
-        s.l = ''
-    def link( s ):
-        return s._p.get( s.l )
-    def setup_obj( s, btn ): # TODO: handle error, show result ?
-        o = s._p
-        o.get( s.path+'/'+s.n ).load_cfg( s.cn )
-        o.update_all()
+        s._l = ''
     def gen_setup( s ):
         o = s._p.get( s.l )
         if hasattr( o, 'gen_setup' ):
             o.gen_setup()
+    def xml_store( s, e ):
+        try:
+            e.attrib[ 'l' ] = s._l
+            e.attrib[ 's' ] = s._s
+        except AttributeError:
+            pass
+    def xml_load( s, e, cm ):
+        try:
+            s._l = e.attrib[ 'l' ]
+            s._s = e.attrib[ 's' ]
+        except AttributeError:
+            pass
 
 class objsel_setup:
-    def __init__( s, ):
+    def __init__( s, l, cfgn, cn ):
         s.__dict__.update(locals())
         del s.s
+    def obj( s ):
+        return link()
+    def setup_obj( s, btn, fo ): # TODO: handle error, show result ?
+        o = s._p
+        o.get( f._l ).load_cfg( s.cfgn )
+        o.update_all()
     def disp( s, fo, cb ):
-        bb =  Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        b.add( bb )
-        b = bb
-        sel_o = fo._p.get( fo.l )
+        b =  Gtk.Box( orientation=Gtk.Orientation.HORIZONTAL )
+        r = [ b ]
+        sel_o = fo._p.get( s.l )
         l = []
         for n,i in sel_o.__dict__.items():
-            if isinstance( i, s.sc ) and not n.startswith( '_' ):
+            if i.__class__.__name__.startswith( s.cn ) and not n.startswith( '_' ):
                 l.append( ( i.n, n ) )
-        b.add( gen_combo( o, n, l, o ) )
+        b.add( gen_combo( fo, '_s', l, fo._p.update_all ) )
         try:
-            so = sel_o.get( s.sel )
+            fo._l = s.l+'/'+fo._s
+            so = fo._p.get( fo._l )
             act_cfg = getattr( so, 'cfg_name', '?' )
-            if not act_cfg == s.cn:
+            if not act_cfg.startswith( s.cfgn ): # TODO: some object info ?
                 b.add( Gtk.Label( 'actual config: ' + act_cfg ) )
                 bst = Gtk.Button( 'Set config: ' + s.cn )
-                bst.connect( 'clicked', s.setup_obj )
+                bst.connect( 'clicked', s.setup_obj, fo )
                 b.add( bst )
         except AttributeError as e:
-            pass
+            b.add( Gtk.Label( 'no objects to select at %s/' % s.l ) )
+        return r
 

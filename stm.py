@@ -118,6 +118,7 @@ class gpio_pin( gui.config_parent ):
             ( 'vset', 'Set high', gui.func_setup(), { 'm':('afio','out') } ),
             ( 'vreset', 'Set low', gui.func_setup(), { 'm':('afio','out') } ),
             ( 'test_freq', 'Test freq', gui.freq_setup( 'test_freq2', (1, 2, 3), (1, 2, 3) ), { 'm':('afio','out') } ),
+            ( 'test_sel', 'Test selection', gui.objsel_setup( '.', 'pin_cfg', 'gpio_pin'), { 'm':('afio','out') } ),
         ],
     )
 
