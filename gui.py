@@ -2,9 +2,9 @@
 
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk
+from gi.repository import Gtk, Gdk
 from gi.repository.GdkPixbuf import Pixbuf
-from gi.repository.Gdk import color_parse
+#from gi.repository.Gdk import color_parse
 import xml.etree.ElementTree as Et
 
 ld_base = {
@@ -56,16 +56,39 @@ class xml_storable:
         return s
 
 def iconview_tp_cb( iv, x, y, kbd, tp ):
-    pp = iv.get_path_at_pos( x, y )
-    if pp is None: return False # may be 0
+    p = iv.get_path_at_pos( x, y )
+    if not p: return False
     m = iv.get_model()
-    e = m.get_value( m.get_iter( pp ), 2 )
+    e = m.get_value( m.get_iter( p ), 2 )
     tp.set_text( e.get_tooltip() )
-    iv.set_tooltip_cell( tp, pp )
+    iv.set_tooltip_cell( tp, p )
     return True
     #iv = o.iv
     #for (i,pp) in o.tooltip_tab:
         #iv.set_tooltip_cell( i, pp )
+
+def iconview_drag_get( iv, ctx, sel, info, tm ):
+    p = iv.get_selected_items()[0]
+    if not p: return False
+    print('path',p)
+    m = iv.get_model()
+    e = m.get_value( m.get_iter(p), 2 )
+    print( 'get', e.n )
+    #tp.set_text( e.get_tooltip() )
+    #iv.set_tooltip_cell( tp, pp )
+    return True
+
+def iconview_drag_recv( iv, ctx, x, y, sel, info, tm ):
+    p, m = iv.get_dest_item_at_pos( x, y )
+    if not p: return False
+    p = int(p.to_string())
+    if m == Gtk.IconViewDropPosition.DROP_RIGHT: p+=1
+    m = iv.get_model()
+    e = m.get_value( m.get_iter( str(p) ), 2 )
+    print('recv',p,e)
+    #tp.set_text( e.get_tooltip() )
+    #iv.set_tooltip_cell( tp, pp )
+    return True
 
 def iconview_ac_cb( iv, p ):
     m = iv.get_model()
@@ -89,7 +112,6 @@ link_func = {
         '..': lambda o: o._p,
         '...': lambda o: o.go_proc()
 }
-
 class link_path:
     def get( s, l ):
         try:
@@ -113,30 +135,25 @@ class link_path:
         t = l.split('/')
         o = s.get( t[:-1] )
         n = t[-1]
-        try:
-            getattr( o, n ).remove()
-        except AttributeError:
-            raise
+#        try:
+#            getattr( o, n ).remove()
+#        except AttributeError:
+#            pass # TODO: log ?
         delattr( o, n )
 
     def set( s, l, v ):
         t = l.split('/')
         o = s.get( t[:-1] )
         n = t[-1]
-        try:
-            getattr( o, n ).remove()
-        except AttributeError:
-            pass # TODO: warning
+#        try: # perform remove first ?
+#            getattr( o, n ).remove()
+#        except AttributeError:
+#            pass
         setattr( o, n, v )
 
-    def get_obj_list( s, t ):
-        o = s._p
-        o = s.get()
-        r = []
-        for n,i in o.__dict__.items():
-            if isinstance( i, t ):
-                r.append( ( n, t.n ) )
-        return r
+    def get_obj_list( s, l, t ):
+        return [ ( n, i.n ) for n,i in s.get(l).__dict__.items()
+                if i.__class__.__name__.startswith( t ) ]
 
 class config_descr:
     def __init__( s, d, tt, ff=[] ):
@@ -277,7 +294,7 @@ class config_parent( link_path, xml_storable ):
 
     def del_child( s, n ):
         try:
-            getattr( s, n ).remove()
+#            getattr( s, n ).remove()
             delattr( s, n )
         except ( KeyError, AttributeError ):
             pass
@@ -363,26 +380,39 @@ class config_parent( link_path, xml_storable ):
                     l = f.disp( d, ucb )
                     for c in l: b.add( c )
             elif hasattr( s, n ): delattr( s, n )
+        d = s.__dict__
+        if not hasattr( s, 'child_order' ): # TODO: support links here ?
+            s.child_order = xml_list( [ n for n,i in d if isinstance( i, config_parent ) ] )
         if s.hasopt('tiles'):
             il = Gtk.ListStore( Pixbuf, str, object )
             iv = Gtk.IconView()
             iv.set_model( il )
             iv.set_pixbuf_column( 0 )
             iv.set_text_column( 1 )
-            for n,i in s.__dict__.items():
-                if isinstance( i, config_parent ):
-                    pixbuf = Gtk.IconTheme.get_default().load_icon(i.get_icon(), 64, 0)
-                    pp = il.get_path( il.append([pixbuf, i.n, i ]) )
+            for n in s.child_order:
+                i = d[n]
+                pixbuf = Gtk.IconTheme.get_default().load_icon(i.get_icon(), 64, 0) # TODO: icon from class
+                pp = il.get_path( il.append([pixbuf, i.n, i ]) )
             iv.set_property( 'has-tooltip', True )
             iv.connect( 'query-tooltip', iconview_tp_cb ) # TODO: method from class
             iv.connect( 'item-activated', iconview_ac_cb )
+            if s.hasopt('tiles_edit'):
+                targets = Gtk.TargetList.new([])
+                targets.add_image_targets(1, True)
+                iv.enable_model_drag_source( Gdk.ModifierType.BUTTON1_MASK, [], Gdk.DragAction.MOVE )
+                iv.enable_model_drag_dest( [], Gdk.DragAction.MOVE )
+                iv.drag_source_set_target_list( targets )
+                iv.drag_dest_set_target_list( targets )
+                iv.connect("drag-data-received", iconview_drag_recv )
+                iv.connect("drag-data-get", iconview_drag_get )
+                iv.connect("drag-data-delete", lambda *x: (print('delete',*x) or True) )
             pb.add( iv )
         else:
-            for n,i in s.__dict__.items():
-                if isinstance( i, config_parent ):
-                    e = Gtk.Expander( label=i.get_val( 'name', i.n ) )
-                    e.connect( 'activate', i.expander_cb )
-                    pb.add( e )
+            for n in s.child_order:
+                i = d[n]
+                e = Gtk.Expander( label=i.get_val( 'name', i.n ) )
+                e.connect( 'activate', i.expander_cb )
+                pb.add( e )
         pb.show_all()
         return pb
 
@@ -416,6 +446,15 @@ class freq_setup:
         fo.update()
         r.append( Gtk.Label( '= '+cnv_num( fo.freq )+'Hz' ) )
         return r
+
+class xml_list( list ):
+    def xml_store( s, e ):
+        a.attrib['l'] = '#'.join( s )
+    def xml_load( s, e, cm ):
+        s[:] = []
+        l = e.attrib.get( 'l', None )
+        if l:
+            s.extend( l.split('#') )
 
 class func( xml_storable ):
     def __init__( s ):
