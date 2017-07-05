@@ -67,29 +67,6 @@ def iconview_tp_cb( iv, x, y, kbd, tp ):
     #for (i,pp) in o.tooltip_tab:
         #iv.set_tooltip_cell( i, pp )
 
-def iconview_drag_get( iv, ctx, sel, info, tm ):
-    p = iv.get_selected_items()[0]
-    if not p: return False
-    print('path',p)
-    m = iv.get_model()
-    e = m.get_value( m.get_iter(p), 2 )
-    print( 'get', e.n )
-    #tp.set_text( e.get_tooltip() )
-    #iv.set_tooltip_cell( tp, pp )
-    return True
-
-def iconview_drag_recv( iv, ctx, x, y, sel, info, tm ):
-    p, m = iv.get_dest_item_at_pos( x, y )
-    if not p: return False
-    p = int(p.to_string())
-    if m == Gtk.IconViewDropPosition.DROP_RIGHT: p+=1
-    m = iv.get_model()
-    e = m.get_value( m.get_iter( str(p) ), 2 )
-    print('recv',p,e)
-    #tp.set_text( e.get_tooltip() )
-    #iv.set_tooltip_cell( tp, pp )
-    return True
-
 def iconview_ac_cb( iv, p ):
     m = iv.get_model()
     e = m.get_value( m.get_iter( p ), 2 )
@@ -113,6 +90,24 @@ link_func = {
         '...': lambda o: o.go_proc()
 }
 class link_path:
+    def tget( s, t ):
+        try:
+            for i in t:
+                if i.startswith( '.' ):
+                    try: # TODO: nop default ?
+                        s = link_func[i]( s )
+                    except AttributeError:
+                        raise NotImplementedError( 'no path command: \'%s\'' % str(i) )
+                else:
+                    try:
+                        s = getattr( s, i )
+                    except AttributeError: # TODO: cut recursion, better error
+                        if s._l:
+                            s = s._p.get( s._l )
+            return s
+        except AttributeError:
+            raise LookupError( 'no path \'%s\'' % l )
+
     def get( s, l ):
         try:
             for i in l.split( '/' ):
@@ -131,9 +126,33 @@ class link_path:
         except AttributeError:
             raise LookupError( 'no path \'%s\'' % l )
 
+    def get_dep( s, l, p ):
+        r = None
+        try:
+            if s._p is p: r = s
+            for i in l.split( '/' ):
+                if i.startswith( '.' ):
+                    try: # TODO: nop default ?
+                        s = link_func[i]( s )
+                    except AttributeError:
+                        raise NotImplementedError( 'no path command: \'%s\'' % str(i) )
+                else:
+                    try:
+                        s = getattr( s, i )
+                    except AttributeError: # TODO: cut recursion, better error
+                        if s._l:
+                            s = s._p.get( s._l )
+                if s._p is p: r = s
+            return r
+        except AttributeError:
+            raise LookupError( 'no path \'%s\'' % l )
+
+    def load_cfg( s, l, n ):
+        lo = .clone(  )
+
     def unlink( s, l ):
         t = l.split('/')
-        o = s.get( t[:-1] )
+        o = s.tget( t[:-1] )
         n = t[-1]
 #        try:
 #            getattr( o, n ).remove()
@@ -143,13 +162,22 @@ class link_path:
 
     def set( s, l, v ):
         t = l.split('/')
-        o = s.get( t[:-1] )
+        o = s.tget( t[:-1] )
         n = t[-1]
 #        try: # perform remove first ?
 #            getattr( o, n ).remove()
 #        except AttributeError:
 #            pass
         setattr( o, n, v )
+
+    def set_cfg( s, l, c ):
+        t = l.split('/')
+        o = s.tget( t[:-1] )
+        n = t[-1]
+        c = c.cp()
+        setattr( o, n, c )
+        c._p = o
+        c.imported()
 
     def get_obj_list( s, l, t ):
         return [ ( n, i.n ) for n,i in s.get(l).__dict__.items()
@@ -241,15 +269,13 @@ def gen_proc_view( t ):
     return tt
 
 class config_parent( link_path, xml_storable ):
+    cp = copy.deepcopy
+
     def get_icon( s ):
         return getattr( s, 'icon', 'edit-copy' )
 
-    def get_val( s, n, default ):
-        if hasattr( s, n ): return getattr( s, n )
-        return default
-
     def has_val( s, n, v ):
-        return hasattr( s, n ) and getattr( s, n )==v
+        return getattr( s, n, None ) == v
 
     def get_cfg( s, n ):
         try:
@@ -258,11 +284,79 @@ class config_parent( link_path, xml_storable ):
             return None
         return getattr( s, n )
 
+    def get_root( s ):
+        try:
+            while not hasattr( s, '_r' ): s=s._p
+        except (AttributeError,KeyError):
+            return None
+        return s
+
+    def load_cfg( s, l, n ):
+        s.set_cfg( s, n, s.get_cfg( 'cfg_loader' )( n ) )
+
+    def imported( s ):
+        for i in s.__dict__.values():
+            if hasattr( i, 'imported' ):
+                i._p = s # !!!!!!!!!
+                i.imported()
+
+    def clr( s ):
+        d = s.__dict__
+        l = []
+        for n,i in d.items():
+            if n.startswith( '_' ):
+                l.append( n )
+            elif hasattr( i, 'clr' ):
+                i.clr()
+        for i in l:
+            del d[n]
+
+    def find_deps( s, p ):
+        r = { s.get_dep( l, p ) for l in s.deps() }
+        for i in s.__dict__.values():
+            try:
+                r |= i.find_deps( p )
+            except AttributeError:
+                pass
+        return r
+
+    def find_child_order( s ): #TODO: dependency cache
+        d = {}
+        od = {}
+        e = { i for i in s.__dict__.values() if isinstance( i, config_parent ) }
+        r = []
+        for n,i in s.__dict__.items():
+            if i in e:
+                try:
+                    d[i] = set( i.find_deps() ) & e
+                    od[i] = n
+                except AttributeError:
+                    pass
+        t = [ o for o,i in d.items() if not i ]
+        while t:
+            t2 = []
+            for i in t:
+                l = d[i]
+                r.append(od[i])
+                for j in l:
+                    dd=d[j]
+                    dd.discard(i)
+                    if not dd:
+                        t2.append()
+                        dd.add(None)
+            t=t2
+        for o,dd in d:
+            if dd != {None}:
+                # TODO: dependency warning
+                r.append( od[o] )
+        return r
+
+
     def wctx( s ):
         return s.get_cfg( '_wctx' )
 
     def start_clk( s ):
-        s.get_cfg('start_clk')( s.n )
+        s.get_cfg( 'start_clk' )( s.n )
 
     def get_tooltip( s ):
         if not hasattr( s, 'descr_short' ): return s.n
@@ -283,11 +377,27 @@ class config_parent( link_path, xml_storable ):
 
     def rollup( s ):
         if hasattr( s, '_pb' ):
+            del s._pbh_children( s._pb )
+            pb = s._pb
+            s.show( pb )
+
+    def editing( s ):
+        return hasattr( s, '_pb' )
+
+    def close( s ):
+        delattr( s, '_pb' )
+
+    def rollup( s ):
+        if hasattr( s, '_pb' ):
             del s._pb
 
     def show_window( s ):
         w = Gtk.Window()
-        w.set_title( s.get_val( 'name', s.n ) )
+
+
+    def show_window( s ):
+        w = Gtk.Window()
+        w.set_title( getattr( s, 'name', s.n ) )
         w.add( s.show() )
         w.show_all()
         return w
@@ -333,6 +443,29 @@ class config_parent( link_path, xml_storable ):
             for i in e.get_children():
                 if isinstance( i, Gtk.Box ):
                     e.remove( i )
+
+    def iv_drag_recv( s, iv, ctx, x, y, sel, info, tm ):
+        p, m = iv.get_dest_item_at_pos( x, y )
+        if not p: return False
+        p = int(p.to_string())
+        if m == Gtk.IconViewDropPosition.DROP_RIGHT: p+=1
+        m = iv.get_model()
+        e = m.get_value( m.get_iter( str(p) ), 2 )
+        print('recv',p,e)
+        #tp.set_text( e.get_tooltip() )
+        #iv.set_tooltip_cell( tp, pp )
+        return True
+
+    def iv_drag_get( s, iv, ctx, sel, info, tm ):
+        p = iv.get_selected_items()[0]
+        if not p: return False
+        print('path',p)
+        m = iv.get_model()
+        e = m.get_value( m.get_iter(p), 2 )
+        print( 'get', e.n )
+        #tp.set_text( e.get_tooltip() )
+        #iv.set_tooltip_cell( tp, pp )
+        return True
 
     def hasopt( s, n ):
         return hasattr( s, n ) and getattr( s, n )
@@ -396,21 +529,21 @@ class config_parent( link_path, xml_storable ):
             iv.set_property( 'has-tooltip', True )
             iv.connect( 'query-tooltip', iconview_tp_cb ) # TODO: method from class
             iv.connect( 'item-activated', iconview_ac_cb )
+            iv.connect( 'drag-data-get', s.iv_drag_get )
+            targets = Gtk.TargetList.new([])
+            targets.add_image_targets(1, True)
+            iv.enable_model_drag_source( Gdk.ModifierType.BUTTON1_MASK, [], Gdk.DragAction.MOVE )
+            iv.drag_source_set_target_list( targets )
             if s.hasopt('tiles_edit'):
-                targets = Gtk.TargetList.new([])
-                targets.add_image_targets(1, True)
-                iv.enable_model_drag_source( Gdk.ModifierType.BUTTON1_MASK, [], Gdk.DragAction.MOVE )
                 iv.enable_model_drag_dest( [], Gdk.DragAction.MOVE )
-                iv.drag_source_set_target_list( targets )
                 iv.drag_dest_set_target_list( targets )
-                iv.connect("drag-data-received", iconview_drag_recv )
-                iv.connect("drag-data-get", iconview_drag_get )
-                iv.connect("drag-data-delete", lambda *x: (print('delete',*x) or True) )
+                iv.connect('drag-data-received', s.iv_drag_recv )
+                iv.connect('drag-data-delete', lambda *x: (print('delete',*x) or True) )
             pb.add( iv )
         else:
             for n in s.child_order:
                 i = d[n]
-                e = Gtk.Expander( label=i.get_val( 'name', i.n ) )
+                e = Gtk.Expander( label=getattr( i, 'name', i.n ) )
                 e.connect( 'activate', i.expander_cb )
                 pb.add( e )
         pb.show_all()
@@ -489,6 +622,11 @@ class link( link_path ):
         try:
             e.attrib[ 'l' ] = s._l
             e.attrib[ 's' ] = s._s
+        except AttributeError:
+            pass
+    def imported( s ):
+        try:
+            s._p.load_cfg( s._l, s._cfg )
         except AttributeError:
             pass
     def xml_load( s, e, cm ):

@@ -4,9 +4,9 @@ import periph_class
 
 # TODO: xml_load
 class obj_loader:
-    def __init__( s, loader, n ):
+    def __init__( s, l, n ):
         s.clr()
-        s.l = loader
+        s.l = l
         s.d = n+'/'
     def clr( s ):
         s.obj_tab = {}
@@ -15,7 +15,7 @@ class obj_loader:
             return s.obj_tab[n]
         except KeyError:
             try:
-                r = s.l().xml_load_file( s.d+n+'.xml' )
+                r = s.l(  s.d+n+'.xml' )
                 s.obj_tab[n] = r
                 return r
             except AttributeError as e:
