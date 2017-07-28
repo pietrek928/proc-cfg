@@ -16,6 +16,10 @@ ld_base = {
 ld_base_r = dict( tuple(reversed(i))
                 for i in ld_base.items() )
 
+def flush_children( o ):
+    for i in o.get_children():
+        o.remove( i )
+
 def store_obj( e, o ):
     t = type(o)
     if t in ld_base_r:
@@ -28,26 +32,34 @@ def store_obj( e, o ):
         except KeyError:
             pass
 
-
-def flush_children( o ):
-    for i in o.get_children():
-        o.remove( i )
-
 class xml_storable:
+    def load_file( s, fn, cm ):
+        e = Et.parse( fn ).getroot()
+        return s.xml_load( e, cm )
+
+    def store_file( s, fn, n='eeelo' ):
+        p = Et.Element( n )
+        s.xml_store( p )
+        Et.ElementTree( p ).write( fn )
+
     def load_obj( s, e, cm ):
         t = e.get('t')
         if t in ld_base:
             return ld_base[t]( ee.attrib['v'] )
         else:
-            r = cm.get(t)().xml_load( e, cl )
+            r = getattr(cm, t)().xml_load( e, cm )
             r._p = s
             return r
 
     def xml_store( s, e ):
         for n,v in s.__dict__.items():
             if not n.startswith('_'):
-                ee = Et.SubElement( e, n )
-                store_obj( ee, v )
+                if isinstance( v, str ):
+                    e.attrib[n] = v
+                else:
+                    ee = Et.SubElement( e, n )
+                    store_obj( ee, v )
+
     def xml_load( s, e, cm ):
         for n,i in e.attrib.items():
             setattr( s, n, str(i) )
@@ -89,8 +101,8 @@ link_func = {
         '..': lambda o: o._p,
         '...': lambda o: o.go_proc()
 }
-class link_path:
-    def tget( s, t ):
+class link_path: # TODO: move to config_parent
+    def _get( s, t ):
         try:
             for i in t:
                 if i.startswith( '.' ):
@@ -147,12 +159,9 @@ class link_path:
         except AttributeError:
             raise LookupError( 'no path \'%s\'' % l )
 
-    def load_cfg( s, l, n ):
-        lo = .clone(  )
-
     def unlink( s, l ):
         t = l.split('/')
-        o = s.tget( t[:-1] )
+        o = s._get( t[:-1] )
         n = t[-1]
 #        try:
 #            getattr( o, n ).remove()
@@ -162,7 +171,7 @@ class link_path:
 
     def set( s, l, v ):
         t = l.split('/')
-        o = s.tget( t[:-1] )
+        o = s._get( t[:-1] )
         n = t[-1]
 #        try: # perform remove first ?
 #            getattr( o, n ).remove()
@@ -172,7 +181,7 @@ class link_path:
 
     def set_cfg( s, l, c ):
         t = l.split('/')
-        o = s.tget( t[:-1] )
+        o = s._get( t[:-1] )
         n = t[-1]
         c = c.cp()
         setattr( o, n, c )
@@ -189,7 +198,7 @@ class config_descr:
         s.tt = [ input_descr( *i ) for i in tt ]
         s.ff = ff
 
-class input_descr( xml_storable ):
+class input_descr: #( xml_storable ):
     def __init__( s, n, vd, fv, sl, update=False, pdescr=None ):
         s.n = n
         s.vd = vd
@@ -199,7 +208,10 @@ class input_descr( xml_storable ):
         if pdescr: s.pdescr = pdescr
 
     def up( s ):
-        return ( hasattr(s,'update') and s.update )
+        try:
+            return s.update
+        except AttributeError:
+            return False
 
 def change_list_cb( cb, s, n, ucb=None ):
     model = cb.get_model()
@@ -277,35 +289,52 @@ class config_parent( link_path, xml_storable ):
     def has_val( s, n, v ):
         return getattr( s, n, None ) == v
 
+    def go_proc( s ):
+        try:
+            while not hasattr( s, 'proc_cfg' ): s = s._p
+        except (AttributeError,KeyError):
+            return None
+        return s
+
     def get_cfg( s, n ):
         try:
-            while not hasattr( s, n ): s=s._p
+            while not hasattr( s, n ): s = s._p
         except (AttributeError,KeyError):
             return None
         return getattr( s, n )
 
     def get_root( s ):
         try:
-            while not hasattr( s, '_r' ): s=s._p
+            while not hasattr( s, '_r' ): s = s._p
         except (AttributeError,KeyError):
             return None
         return s
 
-    def load_cfg( s, l, n ):
-        s.set_cfg( s, n, s.get_cfg( 'cfg_loader' )( n ) )
+    def load_cfg( s, vn, n ):
+        c = s.get_cfg( 'cfg_loader' )( n )
+        setattr( s, vn, c )
+        c._p = s
+        try:
+            c.imported()
+        except AttributeError:
+            pass
+        return c
 
     def imported( s ):
-        for i in s.__dict__.values():
-            if hasattr( i, 'imported' ):
-                i._p = s # !!!!!!!!!
-                i.imported()
+        for n,i in s.__dict__.items():
+            if not n.startswith('_'):
+                try:
+                    i._p = s # !!!!!!!!! object with no imported method
+                    i.imported()
+                except AttributeError:
+                    pass
 
     def clr( s ):
         d = s.__dict__
         l = []
         for n,i in d.items():
             if n.startswith( '_' ):
-                l.append( n )
+                l.append( n ) # cant delete during iteration
             elif hasattr( i, 'clr' ):
                 i.clr()
         for i in l:
@@ -320,6 +349,7 @@ class config_parent( link_path, xml_storable ):
                 pass
         return r
 
+    # returns child names in dependency order
     def find_child_order( s ): #TODO: dependency cache
         d = {}
         od = {}
@@ -351,7 +381,6 @@ class config_parent( link_path, xml_storable ):
                 r.append( od[o] )
         return r
 
-
     def wctx( s ):
         return s.get_cfg( '_wctx' )
 
@@ -375,25 +404,12 @@ class config_parent( link_path, xml_storable ):
     def close( s ):
         delattr( s, '_pb' )
 
-    def rollup( s ):
-        if hasattr( s, '_pb' ):
-            del s._pbh_children( s._pb )
-            pb = s._pb
-            s.show( pb )
-
     def editing( s ):
         return hasattr( s, '_pb' )
-
-    def close( s ):
-        delattr( s, '_pb' )
 
     def rollup( s ):
         if hasattr( s, '_pb' ):
             del s._pb
-
-    def show_window( s ):
-        w = Gtk.Window()
-
 
     def show_window( s ):
         w = Gtk.Window()
@@ -414,20 +430,35 @@ class config_parent( link_path, xml_storable ):
             if hasattr( i, 'remove' ) and not n.startswith( '_' ):
                 i.remove()
 
-    def configure_child( s, n, n_cfg ):
+    def child_reconfig( s, n, cfg_name ):
+        c = s.load_cfg( cfg_name )
         try:
-            e = getattr( s, n )
-            # TODO; check lock
-            e.load_cfg( n_cfg )
-            #e.reconfigure( n_cfg )
-        except KeyError:
-            pass # TODO: log
+            v = getattr( s, n )
+            if v.__class__ is c.__class__:
+                c.reconfigure( c )
+            else:
+                setattr( s, n, c )
+        except AttributeError:
+            setattr( s, n, c )
+        getattr( s, n ).cfg_name = cfg_name
 
+    # returns loaded config
     def load_cfg( s, cfg_name ):
-# TODO: flush vars
-# TODO: configure children ? hide ?
-        s.cfg_name = cfg_name # TODO: check differences, update
+        #s.cfg_name = cfg_name # TODO: check differences, update
         return s.get_cfg( 'import_cfg' )( cfg_name );
+
+    def reconfigure( s, c ):
+        for n,i in c.__dict__.items():
+            if not n.startswith( '_' ):
+                try:
+                    v = getattr( s, n )
+                    if v.__class__ is i.__class__:
+                        v.reconfigure( i )
+                    else:
+                        setattr( s, n, i )
+                except AttributeError:
+                    setattr( s, n, i )
+        # FIXME: remove other params ?
 
     def parent_set_cb( s, c, p ):
         if not c.get_parent():
@@ -472,7 +503,7 @@ class config_parent( link_path, xml_storable ):
 
     def descr_short( s ):
         r = ''
-        for i in s.__dict__.items():
+        for i in s.__dict__.values():
             if hasattr( i, 'descr_line' ):
                 r += e.descr_line()
                 r += '\n'
@@ -515,7 +546,7 @@ class config_parent( link_path, xml_storable ):
             elif hasattr( s, n ): delattr( s, n )
         d = s.__dict__
         if not hasattr( s, 'child_order' ): # TODO: support links here ?
-            s.child_order = xml_list( [ n for n,i in d if isinstance( i, config_parent ) ] )
+            s.child_order = s.find_child_order() # xml_list( [ n for n,i in d if isinstance( i, config_parent ) ] )
         if s.hasopt('tiles'):
             il = Gtk.ListStore( Pixbuf, str, object )
             iv = Gtk.IconView()
@@ -641,10 +672,10 @@ class objsel_setup:
         s.__dict__.update(locals())
         del s.s
     def obj( s ):
-        return link()
+        return link() # FIXME: params to chil object ?
     def setup_obj( s, btn, fo ): # TODO: handle error, show result ?
         o = s._p
-        o.get( f._l ).load_cfg( s.cfgn )
+        o.get( s.l ).child_reconfig( fo._s, s.cfgn )
         o.update_all()
     def disp( s, fo, cb ):
         b =  Gtk.Box( orientation=Gtk.Orientation.HORIZONTAL )
@@ -665,6 +696,6 @@ class objsel_setup:
                 bst.connect( 'clicked', s.setup_obj, fo )
                 b.add( bst )
         except AttributeError as e:
-            b.add( Gtk.Label( 'no objects to select at %s/' % s.l ) )
+            b.add( Gtk.Label( 'no objects to select at {}/'.format( s.l ) ) )
         return r
 

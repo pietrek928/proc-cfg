@@ -1,6 +1,7 @@
 #!/usr/bin/bash
 
 import xml.etree.ElementTree as Et;
+from sys import modules
 
 def dict_get_sorted( d, ll ):
     tt = []
@@ -37,6 +38,8 @@ class reg_bit( xml_storable ):
             s.e=int(ee)
 
 class struct_field( xml_storable ):
+    def __init__( s ):
+        s.b = {}
     def make_array( s, n=1 ):
         if hasattr(s,'ne'): return
         s.le = s.l
@@ -66,8 +69,6 @@ class struct_field( xml_storable ):
             e.attrib[ 't' ] = s.t
         for v in dict_get_sorted( s.b, lambda v: v.b ):
             v.xml_store( e )
-    def __init__( s ):
-        s.b = {}
 
 class struct_descr( xml_storable ):
     def __init__( s ):
@@ -80,9 +81,10 @@ class struct_descr( xml_storable ):
         s.t[f.n] = f
     def union_fields( s, tp ): # called once for single object
         un = None
+        tp = set( tp )
         for i in s.tt:
             if un == None:
-                for j in tp: # binsearch ?
+                for j in tp:
                     if i.n.startswith( j[0] ) and i.n.endswith( j[1] ):
                         un = i
                         s.t.pop( i.n )
@@ -101,7 +103,7 @@ class struct_descr( xml_storable ):
 
 class periph_obj( xml_storable ):
     def gen_setup( s, out, fn, fl, mode ):
-        out.putl('   /* '+fn+': '+str(fl)+'  */')
+        out.putl('   /* {}: {}  */'.format(fn,fl))
         zu = mode.zu # zero used
         zz = mode.zz # zero all
         if zz: zu=False
@@ -123,7 +125,7 @@ class periph_obj( xml_storable ):
         pp =( '=' if zz or mode.ww else '|=' ) # preserve previous
         vol = ( 'volatile ' if mode.vol else '' )
         for it in range(len(vv)): # TODO: preserve current vals
-            fp = '( *('+vol+'uint'+str(f.le*8)+'_t*)'+hex(fpos+it*f.le)+')'
+            fp = '( *({}uint{}_t*){})'.format(vol, f.le*8, hex(fpos+it*f.le))
             nv = None
             av = None
             if zz or vv[it]!=0:
@@ -131,12 +133,22 @@ class periph_obj( xml_storable ):
             if zu and uu[it]!=just_ones:
                 av = '0x%0*x' % (nbits//4,uu[it])
             if av and nv:
-                out.putl(fp+'=((('+fp+')&'+av+')|'+nv+');')
+                out.putl('{0}=((({0})&{1})|{2});'.format(fp, av, nv))
             elif nv:
                 out.putl(fp+pp+nv+';')
             elif av:
-                out.putl(fp+'&='+av+';') # TODO: negate flag
+                out.putl('{}&={};'.format(fp, av)) # TODO: negate flag
     def __init__( s ):
         a=0
+
+class proc_cfg( xml_storable):
+    def __init__( s ):
+        s.clear_data()
+    def clear_data( s ):
+        s.periph_data = {}
+        s.types = {}
+        s.vars = {}
+    def xml_load( s, f ):
+        return s.load_file( e, modules[ __name__ ] )
 
 
