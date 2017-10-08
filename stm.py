@@ -1,13 +1,18 @@
 #!/usr/bin/python
 
-#import cfg
-import gui
+from gui import *
+from processor import *
 
-ID = gui.input_descr
-CD = gui.config_descr
+ID = input_descr
+CD = config_descr
 #freq_descr = gui.freq_descr
 
-class processor( gui.config_parent ): # TODO: processor parent class
+# TODO: single function
+processor_name = __name__
+processor_cfg = proc_cfg( cm=modules[__name__], cfg_dir='periph_config/'+__name__, f='periph_config/{}.xml'.format(processor_name), pcfg=processor_cfg )
+
+class processor( processor ): # TODO: processor parent class
+    _proc_cfg = processor_cfg
     def write_start( s ):
         s.clks = []
         s.psets = {}
@@ -19,9 +24,8 @@ class processor( gui.config_parent ): # TODO: processor parent class
         pass
     def gen_setup( s ):
         for n,i in s.__dict__.items():
-            if hasattr( i, 'gen_setup' ) and not s.startswith( '_' ):
+            if hasattr( i, 'gen_setup' ) and not i.startswith( '_' ):
                 i.get_setup()
-
     def __init__( s, n ):
         s.clr()
         s.ol = G__get_ol( n )
@@ -34,24 +38,9 @@ class processor( gui.config_parent ): # TODO: processor parent class
 #    def wctx( s, p ): # TODO: cache ?
 #        pd = s.get_obj( p )
 #        return write_ctx( s.get_periph( pd.pname() ), s )
-    def import_cfg( s, n ): # TODO: cache ?
-        try:
-            G__ol.get( s.n+'/'+n ) # must be global ?
-        except KeyError:
-            return s.parent_cfg.load_cfg( n )
-    def get_periph( s, n ): # TODO: cache
-        try:
-            return s.periph[ n ]
-        except KeyError:
-            return s.parent_cfg.get_periph( n )
-    def get_var( s, n ): # TODO: cache
-        try:
-            return s.vars[n]
-        except AttributeError:
-            return s.parent_cfg.get_var( n )
     # get periph regs ?
 
-class gpio( gui.config_parent ):
+class gpio( config_parent ):
     def gen_setup( s, param ): # TODO: parametrized setup ?
         cr = {}
         bsrr = {}
@@ -88,7 +77,7 @@ class gpio( gui.config_parent ):
         ],
     )
 
-class gpio_pin( gui.config_parent ):
+class gpio_pin( config_parent ):
 #    def setup( s, c ):
 #        s.num = int( c.num )
 #        s.n = c.n

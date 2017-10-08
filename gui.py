@@ -4,6 +4,7 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk
 from gi.repository.GdkPixbuf import Pixbuf
+from sys import modules
 #from gi.repository.Gdk import color_parse
 import xml.etree.ElementTree as Et
 
@@ -20,52 +21,84 @@ def flush_children( o ):
     for i in o.get_children():
         o.remove( i )
 
-def store_obj( e, o ):
+def _xml_store( fl, e ):
+    for n,v in fl:
+        if not n.startswith('_'):
+            if isinstance( v, str ):
+                e.attrib[n] = v
+            else:
+                ee = Et.SubElement( e, n )
+                _store_obj( ee, v )
+
+def _xml_load( e, cm ):
+    return ([ (n,str(i)) for n,i in e.attrib.items() ]
+            + [ (ee.tag, _load_obj( ee, cm )) for ee in e ])
+
+dmod = modules[list.__module__]
+
+def _load_obj( e, cm ):
+    t = e.get('_t')
+    #print( e, t )
+    if t in ld_base:
+        return ld_base[t]( e.attrib['v'] )
+    else:
+        try:
+            r = getattr(cm, t)()
+        except (KeyError, AttributeError):
+            r = getattr(dmod, t)()
+        try:
+            r = r.xml_load( e, cm )
+        except (KeyError, AttributeError):
+            if isinstance( r, dict ):
+                r.update( _xml_load( e, cm ) )
+            else:
+                try:
+                    r.extend( list(zip( _xml_load( e, cm ) ))[1] )
+                except IndexError:
+                    pass
+        return r
+
+def _store_obj( e, o ):
     t = type(o)
     if t in ld_base_r:
-        e.attrib[ 't' ] = ld_base_r[t]
+        e.attrib[ '_t' ] = ld_base_r[t]
         e.attrib[ 'v' ] = str( o )
     else:
         try:
-            e.attrib[ 't' ] = type(o).__name__;
+            e.attrib[ '_t' ] = type(o).__name__;
             o.xml_store( e )
-        except KeyError:
-            pass
+        except (KeyError, AttributeError):
+            if isinstance( o, dict ):
+                _xml_store( o.items(), e )
+            else:
+                _xml_store( zip(['l']*len(o),o), e )
 
 class xml_storable:
     def load_file( s, fn, cm ):
         e = Et.parse( fn ).getroot()
-        return s.xml_load( e, cm )
+        r = _load_obj( e, cm )
+        r.fix_parent()
+        return r
 
     def store_file( s, fn, n='eeelo' ):
         p = Et.Element( n )
-        s.xml_store( p )
+        _store_obj( p, s )
         Et.ElementTree( p ).write( fn )
 
-    def load_obj( s, e, cm ):
-        t = e.get('t')
-        if t in ld_base:
-            return ld_base[t]( ee.attrib['v'] )
-        else:
-            r = getattr(cm, t)().xml_load( e, cm )
-            r._p = s
-            return r
-
-    def xml_store( s, e ):
-        for n,v in s.__dict__.items():
+    def fix_parent( s ):
+        for n,i in s.__dict__.items():
             if not n.startswith('_'):
-                if isinstance( v, str ):
-                    e.attrib[n] = v
-                else:
-                    ee = Et.SubElement( e, n )
-                    store_obj( ee, v )
+                try:
+                    i._p = s
+                    i.fix_parent()
+                except (KeyError, AttributeError):
+                    pass
 
     def xml_load( s, e, cm ):
-        for n,i in e.attrib.items():
-            setattr( s, n, str(i) )
-        for ee in e:
-            setattr( s, ee.tag, s.load_obj( ee, cm ) )
+        s.__dict__.update( _xml_load( e, cm ) )
         return s
+    def xml_store( s, e ):
+        _xml_store( s.__dict__.items(), e )
 
 def iconview_tp_cb( iv, x, y, kbd, tp ):
     p = iv.get_path_at_pos( x, y )
@@ -179,18 +212,28 @@ class link_path: # TODO: move to config_parent
 #            pass
         setattr( o, n, v )
 
-    def set_cfg( s, l, c ):
-        t = l.split('/')
-        o = s._get( t[:-1] )
-        n = t[-1]
-        c = c.cp()
-        setattr( o, n, c )
-        c._p = o
-        c.imported()
+#    def set_cfg( s, l, c ):
+#        t = l.split('/')
+#        o = s._get( t[:-1] )
+#        n = t[-1]
+#        c = c.cp()
+#        setattr( o, n, c )
+#        c._p = o
+#        c.imported()
 
     def get_obj_list( s, l, t ):
         return [ ( n, i.n ) for n,i in s.get(l).__dict__.items()
                 if i.__class__.__name__.startswith( t ) ]
+
+    def v( s ):
+        while hasattr( s, '_l' ):
+            s = s.get( s._l )
+        return s
+
+    def link_reconfigure( s, l, c ):
+        t = l.split('/')
+        o = s._get( t[:-1] )
+        o.child_reconfig( c, t[-1] )
 
 class config_descr:
     def __init__( s, d, tt, ff=[] ):
@@ -281,7 +324,7 @@ def gen_proc_view( t ):
     return tt
 
 class config_parent( link_path, xml_storable ):
-    cp = copy.deepcopy
+    #cp = copy.deepcopy TODO: other copy, ignore some attrs
 
     def get_icon( s ):
         return getattr( s, 'icon', 'edit-copy' )
@@ -296,7 +339,7 @@ class config_parent( link_path, xml_storable ):
             return None
         return s
 
-    def get_cfg( s, n ):
+    def get_cfg( s, n ): # TODO: cache
         try:
             while not hasattr( s, n ): s = s._p
         except (AttributeError,KeyError):
@@ -310,15 +353,15 @@ class config_parent( link_path, xml_storable ):
             return None
         return s
 
-    def load_cfg( s, vn, n ):
-        c = s.get_cfg( 'cfg_loader' )( n )
-        setattr( s, vn, c )
-        c._p = s
-        try:
-            c.imported()
-        except AttributeError:
-            pass
-        return c
+#    def load_cfg( s, vn, n ):
+#        c = s.get_cfg( 'import_cfg' )( n )
+#        setattr( s, vn, c )
+#        c._p = s
+#        try:
+#            c.imported()
+#        except AttributeError:
+#            pass
+#        return c
 
     def imported( s ):
         for n,i in s.__dict__.items():
@@ -337,14 +380,14 @@ class config_parent( link_path, xml_storable ):
                 l.append( n ) # cant delete during iteration
             elif hasattr( i, 'clr' ):
                 i.clr()
-        for i in l:
+        for n in l:
             del d[n]
 
-    def find_deps( s, p ):
-        r = { s.get_dep( l, p ) for l in s.deps() }
+    def find_deps( s ):
+        r = { s.get_dep( l ) for l in s.deps() }
         for i in s.__dict__.values():
             try:
-                r |= i.find_deps( p )
+                r |= i.find_deps()
             except AttributeError:
                 pass
         return r
@@ -398,9 +441,6 @@ class config_parent( link_path, xml_storable ):
             pb = s._pb
             s.show( pb )
 
-    def editing( s ):
-        return hasattr( s, '_pb' )
-
     def close( s ):
         delattr( s, '_pb' )
 
@@ -420,8 +460,9 @@ class config_parent( link_path, xml_storable ):
 
     def del_child( s, n ):
         try:
-#            getattr( s, n ).remove()
+            e = getattr( s, n )
             delattr( s, n )
+            e.remove()
         except ( KeyError, AttributeError ):
             pass
 
@@ -430,8 +471,24 @@ class config_parent( link_path, xml_storable ):
             if hasattr( i, 'remove' ) and not n.startswith( '_' ):
                 i.remove()
 
-    def child_reconfig( s, n, cfg_name ):
-        c = s.load_cfg( cfg_name )
+    def default_name( s, o=None ):
+        n = s.__class__.__name__
+        if not o: return n
+        n += '_'
+        i = 1
+        while hasattr( o, n+str(i) ):
+            i+=1
+        return n+str(i)
+
+    # returns loaded config
+    def load_cfg( s, cfg_name ):
+        return s.get_cfg( 'import_cfg' )( cfg_name )
+
+    def child_reconfig( s, c, n=None ):
+        if isinstance( c, str ):
+            c = s.load_cfg( c )
+        if not n:
+            n = c.default_name( s )
         try:
             v = getattr( s, n )
             if v.__class__ is c.__class__:
@@ -440,12 +497,6 @@ class config_parent( link_path, xml_storable ):
                 setattr( s, n, c )
         except AttributeError:
             setattr( s, n, c )
-        getattr( s, n ).cfg_name = cfg_name
-
-    # returns loaded config
-    def load_cfg( s, cfg_name ):
-        #s.cfg_name = cfg_name # TODO: check differences, update
-        return s.get_cfg( 'import_cfg' )( cfg_name );
 
     def reconfigure( s, c ):
         for n,i in c.__dict__.items():
@@ -483,6 +534,8 @@ class config_parent( link_path, xml_storable ):
         m = iv.get_model()
         e = m.get_value( m.get_iter( str(p) ), 2 )
         print('recv',p,e)
+        s.child_reconfig( e )
+        s.find_child_order()
         #tp.set_text( e.get_tooltip() )
         #iv.set_tooltip_cell( tp, pp )
         return True
@@ -642,9 +695,9 @@ class func_setup:
         b_en.connect('clicked', fo.update_cb, 'en', fo._p.update_all)
         return r
 
-class link( link_path ):
+class link( xml_storable ):
     def __init__( s ):
-        s._l = ''
+        s._l = '.'
     def gen_setup( s ):
         o = s._p.get( s.l )
         if hasattr( o, 'gen_setup' ):
@@ -657,9 +710,17 @@ class link( link_path ):
             pass
     def imported( s ):
         try:
-            s._p.load_cfg( s._l, s._cfg )
+            c = s._p.load_cfg( c._cfg )
+            s._p.link_reconfigure( l, c )
         except AttributeError:
             pass
+    def reconfigure( s, c ): # TODO: configure action/rules
+        l = s._l
+        if hasattr( c, 'cfg_name' ):
+            c = s._p.load_cfg( c.cfg_name )
+            s._p.link_reconfigure( l, c )
+        else:
+            s.set( s._l, c )
     def xml_load( s, e, cm ):
         try:
             s._l = e.attrib[ 'l' ]
@@ -674,8 +735,8 @@ class objsel_setup:
     def obj( s ):
         return link() # FIXME: params to chil object ?
     def setup_obj( s, btn, fo ): # TODO: handle error, show result ?
-        o = s._p
-        o.get( s.l ).child_reconfig( fo._s, s.cfgn )
+        o = fo._p
+        o.link_reconfigure( fo._l, s.cfgn )
         o.update_all()
     def disp( s, fo, cb ):
         b =  Gtk.Box( orientation=Gtk.Orientation.HORIZONTAL )

@@ -3,6 +3,8 @@
 import xml.etree.ElementTree as Et;
 from sys import modules
 
+from gui import xml_storable, _store_obj
+
 def dict_get_sorted( d, ll ):
     tt = []
     for vn,v in d.items():
@@ -25,12 +27,11 @@ class reg_bit( xml_storable ):
         s.b = bb
         if not bb==b-1:
             s.e = b-1
-    def xml_store( s, pp ):
-        e = Et.SubElement( pp, 'bit' )
+    def xml_store( s, e ):
         e.attrib[ 'n' ] = s.n
         e.attrib[ 'b' ] = str( s.b )
         if ( hasattr( s, 'e' ) ): e.attrib[ 'e' ] = str( s.e )
-    def xml_load( s, e ):
+    def xml_load( s, e, cm ):
         s.n = e.attrib[ 'n' ]
         s.b = int( e.attrib['b'] )
         ee = e.attrib.get('e')
@@ -57,8 +58,7 @@ class struct_field( xml_storable ):
         s.ne += f.ne
         s.l = s.le*s.ne
         del f
-    def xml_store( s, pp ):
-        e = Et.SubElement( pp, 'field' )
+    def xml_store( s, e ):
         e.attrib[ 'n' ] = s.n
         if ( hasattr( s, 'ne' ) ):
             e.attrib[ 'ne' ] = str( s.ne )
@@ -67,8 +67,15 @@ class struct_field( xml_storable ):
             e.attrib[ 'l' ] = str( s.l )
         if hasattr( s, 't' ):
             e.attrib[ 't' ] = s.t
-        for v in dict_get_sorted( s.b, lambda v: v.b ):
-            v.xml_store( e )
+        if hasattr( s, 'doc' ):
+            e.attrib[ 'doc' ] = s.doc
+        ee = Et.SubElement( e, 'v' )
+        _store_obj( ee, dict_get_sorted( s.b, lambda v: v.b ) )
+    def get_descr( s ):
+        try:
+            return '{}({})'.format( s.n, s.doc )
+        except AttributeError:
+            return s.n
 
 class struct_descr( xml_storable ):
     def __init__( s ):
@@ -81,7 +88,6 @@ class struct_descr( xml_storable ):
         s.t[f.n] = f
     def union_fields( s, tp ): # called once for single object
         un = None
-        tp = set( tp )
         for i in s.tt:
             if un == None:
                 for j in tp:
@@ -102,12 +108,12 @@ class struct_descr( xml_storable ):
         if hasattr( s, 'tt' ): delattr( s, 'tt' )
 
 class periph_obj( xml_storable ):
-    def gen_setup( s, out, fn, fl, mode ):
-        out.putl('   /* {}: {}  */'.format(fn,fl))
+    def gen_setup( s, out, fn, fl, mode ): # TODO: faster version in C++
+        f = s.t.t[ fn ]
+        out.putl('   /* {}: {}  */'.format(f.get_descr(),fl))
         zu = mode.zu # zero used
         zz = mode.zz # zero all
         if zz: zu=False
-        f = s.t.t[ fn ]
         f.make_array() # !!!!!!
         vv = [0]*f.ne
         nbits = f.le*8
@@ -142,13 +148,32 @@ class periph_obj( xml_storable ):
         a=0
 
 class proc_cfg( xml_storable):
-    def __init__( s ):
+    def __init__( s, cm=None, cfg_dir=None, f=None, pcfg=None ):
         s.clear_data()
+        s._cm = cm
+        s._pcfg = pcfg
+        s._cfg_dir = cfg_dir
+        if f:
+            s.load_file( f, modules[ __name__ ] )
     def clear_data( s ):
         s.periph_data = {}
         s.types = {}
         s.vars = {}
-    def xml_load( s, f ):
-        return s.load_file( e, modules[ __name__ ] )
-
+    def import_cfg( s, n ):
+        try:
+            r = s.load_obj( '{}/{}.xml'.format( s._cfg_dir, n ), s._cm )
+            r.cfg_name = n;
+            return r
+        except KeyError:
+            return s._pcfg.import_cfg( n )
+    def get_periph( s, n ): # TODO: cache
+        try:
+            return s.periph[ n ]
+        except KeyError:
+            return s._pcfg.get_periph( n )
+    def get_var( s, n ): # TODO: cache
+        try:
+            return s.vars[n]
+        except KeyError:
+            return s._pcfg.get_var( n )
 

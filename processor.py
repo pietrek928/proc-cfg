@@ -2,7 +2,12 @@
 
 from sys import modules
 
-G__ol = xml_storable.load_obj
+from gui import *
+from periph_class import proc_cfg
+
+#G__ol = xml_storable.load_obj
+
+processor_cfg = None
 
 class processor( config_parent ):
     def write_start( s ):
@@ -26,26 +31,8 @@ class processor( config_parent ):
     def wctx( s, p ): # TODO: cache
         pd = s.get_obj( p )
         return write_ctx( s.get_periph( pd.pname() ), s )
-    def import_cfg( s, n ):
-        try:
-            r = s.load_obj(
-                    '{}/{}.xml'.format( s.n, n ),
-                    modules[ s.__module__ ]
-                )
-            r.cfg_name = n;
-            return r
-        except KeyError:
-            return s.parent_cfg.import_cfg( n )
-    def get_periph( s, n ): # TODO: cache
-        try:
-            return s.periph[ n ]
-        except KeyError:
-            return super().get_periph( n )
-    def get_var( s, n ): # TODO: cache
-        try:
-            return s.vars[n]
-        except KeyError:
-            return super().get_var( n )
+    def import_cfg( s, n ): # TODO: cache
+        s._proc_cfg.import_cfg( n )
     # get periph regs ?
 
 class write_ctx:

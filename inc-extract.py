@@ -34,9 +34,11 @@ type_len = {
         'uint16_t':2,
         'uint32_t':4,
         }
+processor = pc.proc_cfg()
+periph_data = processor.periph_data
+n_obj_set = processor.types
 
 rn_obj_set = {}
-n_obj_set = {}
 
 def str_match_begin( A, w ):
     try:
@@ -94,7 +96,14 @@ class proc_typedef:
         return True
 
     def proc_doc( s, doc ):
-        if hasattr( s, 'prev_o' ): s.prev_o.doc = doc
+        if hasattr( s, 'prev_o' ):
+            while doc and doc[0] in ' /*!<':
+                doc = doc[1:]
+            while doc and doc[-1] in ' /*!<':
+                doc = doc[:-1]
+            doc = doc.split('  ')
+            d = ' '.join([ i for i in doc if len(i)>3])
+            s.prev_o.doc = d
 
     def __del__( s ):
         if hasattr( s, 'start' ): return;
@@ -109,7 +118,6 @@ class proc_typedef:
 
 reg_pos_data = {}
 addr_data = {}
-periph_data = {}
 
 class proc_define:
     def __init__( s ):
@@ -121,7 +129,8 @@ class proc_define:
         s.v += w
         return True
     def proc_doc( s, doc ):
-        s.doc = doc
+        if hasattr( s, 'prev_o' ):
+            s.prev_o.doc = doc
     def __del__( s ):
         if not hasattr( s, 'n' ):
             print( 'define interpreting error; line: '+str(s.ln) )
@@ -204,9 +213,10 @@ class proc_define:
                                 msk = int(vv,16)
                             except:
                                 print('processing define error '+s.n+' '+s.v)
-                        if msk == None: return;
-                        bb = r.b[bn] = pc.reg_bit( bn, msk )
-                        if hasattr( s, 'doc' ): bb.doc = s.doc
+                        if msk == None: return
+                        bb = r.b[bn] = pc.reg_bit()
+                        bb.set( bn, msk )
+                        s.prev_o = bb
                         #print( 'reg '+rn+'('+bn+'): '+str(bb.b)+'-'+str(bb.b if not hasattr(bb,'e') else bb.e)+'    '+bb.doc )
         #print( 'end define '+s.n+' '+s.v )
 
@@ -250,14 +260,15 @@ with open( sys.argv[1] ) as f:
 
 n_obj_set[ 'RCC' ].union_fields( [ [ '', 'ENR' ] ] )
 
-processor = pc.processor_descr()
-processor.periph_data = periph_data
-processor.types = n_obj_set
-processor.xml_store( 'a.xml' )
+processor.store_file( 'a.xml', n='proc' )
 
+from sys import modules
+tst = pc.proc_cfg()
+tst.load_file( 'a.xml', pc )
 
-oo = pc.out_proc()
-mm = pc.mode_obj()
+import processor as pp
+oo = pp.out_proc()
+mm = pp.mode_obj()
 mm.vol = True
 #mm.zz = True
 mm.zu = True
