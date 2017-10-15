@@ -2,14 +2,16 @@
 
 from gui import *
 from processor import *
+from periph_class import load_proc_cfg
 
 ID = input_descr
 CD = config_descr
+FS = func_setup
 #freq_descr = gui.freq_descr
 
 # TODO: single function
 processor_name = __name__
-processor_cfg = proc_cfg( cm=modules[__name__], cfg_dir='periph_config/'+__name__, f='periph_config/{}.xml'.format(processor_name), pcfg=processor_cfg )
+processor_cfg = load_proc_cfg( cm=modules[__name__], cfg_dir='periph_config/'+__name__, f='periph_config/{}.xml'.format(processor_name), pcfg=processor_cfg )
 
 class processor( processor ): # TODO: processor parent class
     _proc_cfg = processor_cfg
@@ -71,7 +73,7 @@ class gpio( config_parent ):
     def descr_pname( s ):
         return 'P'+s.id
 
-    descr = gui.config_descr(
+    descr = CD(
         'GPIO port setup',
         [
         ],
@@ -95,7 +97,7 @@ class gpio_pin( config_parent ):
     def descr_pname( s ):
         return s._p.descr_pname()+str(s.num)
 
-    descr = gui.config_descr(
+    descr = CD(
         'GPIO pin setup',
         [
             ( 'm', 'Mode', ('out','in','afio'), {}, True ),
@@ -103,11 +105,11 @@ class gpio_pin( config_parent ):
             ( 'out_mode', 'Output mode', (('push-pull',0),('open-drain',1)), { 'm':('afio','out') } ),
             ( 'spd', 'Output speed', ( ('2MHz',2), ('10MHz',1), ('50MHz',3) ), { 'm':('afio','out') } ),
             ( 'in_mode', 'Input mode', ('up','down','analog','floating'), { 'm':('in') } ),
-            ( 'val', 'Get value', gui.func_setup(), { 'm':('afio','in') } ),
-            ( 'vset', 'Set high', gui.func_setup(), { 'm':('afio','out') } ),
-            ( 'vreset', 'Set low', gui.func_setup(), { 'm':('afio','out') } ),
-            ( 'test_freq', 'Test freq', gui.freq_setup( 'test_freq2', (1, 2, 3), (1, 2, 3) ), { 'm':('afio','out') } ),
-            ( 'test_sel', 'Test selection', gui.objsel_setup( '.', 'pin_cfg', 'gpio_pin'), { 'm':('afio','out') } ),
+            ( 'val', 'Get value', FS(), { 'm':('afio','in') } ),
+            ( 'vset', 'Set high', FS(), { 'm':('afio','out') } ),
+            ( 'vreset', 'Set low', FS(), { 'm':('afio','out') } ),
+            ( 'test_freq', 'Test freq', freq_setup( 'test_freq2', (1, 2, 3), (1, 2, 3) ), { 'm':('afio','out') } ),
+            ( 'test_sel', 'Test selection', objsel_setup( '.', 'pin_cfg', 'gpio_pin'), { 'm':('afio','out') } ),
         ],
     )
 

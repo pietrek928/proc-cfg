@@ -7,7 +7,8 @@ import bisect;
 import periph_class as pc
 
 end_chr = ( '/', '\n' )
-delim_chr = ( ';', ',' )
+delim_chr = ( ';', ',', '/' )
+com_beg_chr = '/*<'
 typedef_known_words = ( '__IO', '__I', '{' )
 define_bad_begin = [
         'IS_',
@@ -39,6 +40,14 @@ periph_data = processor.periph_data
 n_obj_set = processor.types
 
 rn_obj_set = {}
+
+def cut_doc( doc ):
+    while doc and doc[0] in ' /*!<':
+        doc = doc[1:]
+    while doc and doc[-1] in ' /*!<':
+        doc = doc[:-1]
+    doc = doc.split('  ')
+    return ' '.join([ i for i in doc if len(i)>3])
 
 def str_match_begin( A, w ):
     try:
@@ -88,24 +97,16 @@ class proc_typedef:
             s.f.n = w # TODO: reserved, array, multireg
             if s.f.n.startswith( 'Reserved' ) or s.f.n.startswith( 'RESERVED' ):
                 s.f.reserved = True
-            #print(w)
             s.o.add( s.f )
-            s.o.tt.append( s.f )
             s.prev_o = s.f
             s.f = None
         return True
 
     def proc_doc( s, doc ):
-        if hasattr( s, 'prev_o' ):
-            while doc and doc[0] in ' /*!<':
-                doc = doc[1:]
-            while doc and doc[-1] in ' /*!<':
-                doc = doc[:-1]
-            doc = doc.split('  ')
-            d = ' '.join([ i for i in doc if len(i)>3])
-            s.prev_o.doc = d
+        if hasattr( s, 'prev_o' ) and not hasattr( s.prev_o, 'doc' ):
+            s.prev_o.doc = cut_doc( doc )
 
-    def __del__( s ):
+    def finish( s ):
         if hasattr( s, 'start' ): return;
         if not hasattr( s, 'rn' ): print( 'struct interpreting error; line: '+str(s.ln) ); return
         s.n = s.rn
@@ -114,12 +115,13 @@ class proc_typedef:
         s.o.n=s.n; s.o.rn=s.rn;
         n_obj_set[s.o.n] = s.o
         rn_obj_set[s.o.rn] = s.o
-        #print( 'end typedef ' + s.n + '; size: '+str(s.o.l) )
+        s.o.update_load()
 
 reg_pos_data = {}
 addr_data = {}
 
 class proc_define:
+    one_line = True
     def __init__( s ):
         s.v = ''
     def proc( s, w ):
@@ -130,17 +132,17 @@ class proc_define:
         return True
     def proc_doc( s, doc ):
         if hasattr( s, 'prev_o' ):
-            s.prev_o.doc = doc
-    def __del__( s ):
+            s.prev_o.doc = cut_doc( doc )
+    def finish( s ):
         if not hasattr( s, 'n' ):
             print( 'define interpreting error; line: '+str(s.ln) )
             return;
         try:
             bs = define_pref_swap[ bisect.bisect_right( define_pref_swap, (s.n,'') )-1 ]
             if s.n.startswith( bs[0] ):
-                s.n = bs[1] + s.n[len(bs[0]):]
+                s.n = bs[1] + s._n[len(bs[0]):]
         except:
-            fooooooooooooo=0
+            pass
         if str_match_begin( define_bad_begin, s.n ):
             print( 'define has forbidden begin', s.n )
             return;
@@ -184,18 +186,18 @@ class proc_define:
                 nn=nn[0:-1]
             oname = nn[0]; nn=nn[1:]
             for i in nn:
-                if not n_obj_set.get(oname) == None:
+                if n_obj_set.get(oname):
                     nl = nnl
                     o = n_obj_set.get(oname)
                 oname += '_'+i
                 nnl=nnl+1
-            if not o == None:
+            if o:
                 nn = nn[nl:]
                 if len(nn)==2 and '(' in s.v:
-                    rn=nn[0]
+                    rn = nn[0]
                     bn = nn[1]
-                    r=o.t.get( rn )
-                    if not r == None:
+                    r=o._t.get( rn )
+                    if r:
                         msk = None
                         if hasattr( s, 'pp' ):
                             try:
@@ -227,7 +229,6 @@ proc_obj_tab = {
 
 #"""
 proc_obj = None
-#print(proc_obj_tab)
 n = 0
 with open( sys.argv[1] ) as f:
     l = ' '
@@ -239,18 +240,27 @@ with open( sys.argv[1] ) as f:
                 ii=ii+1
                 if len(w)<1: continue;
                 if w[-1] in delim_chr: w=w[:-1]
-                if w[0] in end_chr : break;
-                if proc_obj == None:
+                if w[0] in end_chr or w.startswith( com_beg_chr ): break;
+                if proc_obj:
+                    if not proc_obj.proc( w ):
+                        proc_obj.finish()
+                        if hasattr( proc_obj, 'proc_doc' ):
+                            proc_obj.proc_doc( ' '.join(l[ii-1:]) )
+                        proc_obj = None
+                        break;
+                else:
                     aa = proc_obj_tab.get( w )
                     if aa != None:
                         proc_obj = aa()
                         proc_obj.ln = n
-                else:
-                    if not proc_obj.proc( w ):
-                        proc_obj = None
-        if hasattr( proc_obj, 'proc_doc' ):
-            proc_obj.proc_doc( ' '.join(l[ii-1:]) )
-        if isinstance( proc_obj, proc_define ): proc_obj=None
+        if hasattr( proc_obj, 'one_line' ) and proc_obj.one_line:
+            proc_obj.finish()
+            if hasattr( proc_obj, 'proc_doc' ):
+                proc_obj.proc_doc( ' '.join(l[ii-1:]) )
+            proc_obj=None
+        else:
+            if hasattr( proc_obj, 'proc_doc' ):
+                proc_obj.proc_doc( ' '.join(l[ii-1:]) )
         l = ' '
         n = n+1
         try:
@@ -258,13 +268,15 @@ with open( sys.argv[1] ) as f:
         except:
             print( 'reading line error; line: '+str(n) )
 
+n_obj_set[ 'ADC' ].union_fields( [ [ 'CR', '' ], [ 'SMPR1', '' ], [ 'JOFR', '' ], [ 'SQR', '' ] ] )
 n_obj_set[ 'RCC' ].union_fields( [ [ '', 'ENR' ] ] )
 
 processor.store_file( 'a.xml', n='proc' )
 
 from sys import modules
-tst = pc.proc_cfg()
-tst.load_file( 'a.xml', pc )
+from gui import load_file
+tst = load_file( 'a.xml', pc )
+periph_data = tst.periph_data
 
 import processor as pp
 oo = pp.out_proc()

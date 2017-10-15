@@ -31,14 +31,13 @@ def _xml_store( fl, e ):
                 _store_obj( ee, v )
 
 def _xml_load( e, cm ):
-    return ([ (n,str(i)) for n,i in e.attrib.items() ]
+    return ([ (n,str(i)) for n,i in e.attrib.items() if not n.startswith('_') ]
             + [ (ee.tag, _load_obj( ee, cm )) for ee in e ])
 
 dmod = modules[list.__module__]
 
 def _load_obj( e, cm ):
-    t = e.get('_t')
-    #print( e, t )
+    t = e.get('_')
     if t in ld_base:
         return ld_base[t]( e.attrib['v'] )
     else:
@@ -61,11 +60,11 @@ def _load_obj( e, cm ):
 def _store_obj( e, o ):
     t = type(o)
     if t in ld_base_r:
-        e.attrib[ '_t' ] = ld_base_r[t]
+        e.attrib[ '_' ] = ld_base_r[t]
         e.attrib[ 'v' ] = str( o )
     else:
         try:
-            e.attrib[ '_t' ] = type(o).__name__;
+            e.attrib[ '_' ] = type(o).__name__;
             o.xml_store( e )
         except (KeyError, AttributeError):
             if isinstance( o, dict ):
@@ -73,13 +72,13 @@ def _store_obj( e, o ):
             else:
                 _xml_store( zip(['l']*len(o),o), e )
 
-class xml_storable:
-    def load_file( s, fn, cm ):
-        e = Et.parse( fn ).getroot()
-        r = _load_obj( e, cm )
-        r.fix_parent()
-        return r
+def load_file( fn, cm ):
+    e = Et.parse( fn ).getroot()
+    r = _load_obj( e, cm )
+    r.fix_parent()
+    return r
 
+class xml_storable:
     def store_file( s, fn, n='eeelo' ):
         p = Et.Element( n )
         _store_obj( p, s )

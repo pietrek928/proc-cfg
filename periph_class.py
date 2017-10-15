@@ -3,12 +3,32 @@
 import xml.etree.ElementTree as Et;
 from sys import modules
 
-from gui import xml_storable, _store_obj
+from gui import xml_storable, load_file, _store_obj, _xml_store, _xml_load
+
+class nl( list ):
+    def xml_store( s, e ):
+        _xml_store([ (i.n,i) for i in s ], e)
+        for i in e:
+            i.attrib.pop( 'n', None )
+    def xml_load( s, e, cm ):
+        for n,i in _xml_load( e, cm ):
+            i.n = n
+            s.append( i )
+        return s
+
+class nd( dict ):
+    def xml_store( s, e ):
+        _xml_store(s.items(), e)
+        for i in e:
+            i.attrib.pop( 'n', None )
+    def xml_load( s, e, cm ):
+        for n,i in _xml_load( e, cm ):
+            i.n = n
+            s[n]=i
+        return s
 
 def dict_get_sorted( d, ll ):
-    tt = []
-    for vn,v in d.items():
-        tt.append( v )
+    tt = [ *d.values() ]
     tt.sort( key=ll )
     return tt
 
@@ -30,47 +50,52 @@ class reg_bit( xml_storable ):
     def xml_store( s, e ):
         e.attrib[ 'n' ] = s.n
         e.attrib[ 'b' ] = str( s.b )
+        if hasattr( s, 'doc' ):
+            e.attrib[ 'doc' ] = s.doc
         if ( hasattr( s, 'e' ) ): e.attrib[ 'e' ] = str( s.e )
-    def xml_load( s, e, cm ):
-        s.n = e.attrib[ 'n' ]
-        s.b = int( e.attrib['b'] )
-        ee = e.attrib.get('e')
-        if ( ee ):
-            s.e=int(ee)
+    def xml_load( s, *a ):
+        super().xml_load( *a )
+        s.b = int( s.b )
+        if hasattr( s, 'e' ): s.e = int(s.e)
+        return s
 
 class struct_field( xml_storable ):
     def __init__( s ):
         s.b = {}
     def make_array( s, n=1 ):
         if hasattr(s,'ne'): return
-        s.le = s.l
         s.ne = n
-        s.l = s.le * s.ne
+    def size( s ):
+        return (s.ne if hasattr(s,'ne') else 1)*s.l
     def join( s, f ):
         s.make_array()
         f.make_array()
-        if not s.le == f.le: ValueError('different element sizes')
-        off = s.l*8
+        if not s.l == f.l: ValueError('different element sizes')
+        off = s.size()*8
         for nn,i in f.b.items():
             i.b += off
             if hasattr( i, 'e' ): i.b += off
             s.b[ nn ] = i
         s.ne += f.ne
-        s.l = s.le*s.ne
         del f
     def xml_store( s, e ):
-        e.attrib[ 'n' ] = s.n
-        if ( hasattr( s, 'ne' ) ):
+        if hasattr( s, 'ne' ):
             e.attrib[ 'ne' ] = str( s.ne )
-            e.attrib[ 'le' ] = str( s.le )
-        else:
+        if not hasattr( s, 't' ):
             e.attrib[ 'l' ] = str( s.l )
         if hasattr( s, 't' ):
-            e.attrib[ 't' ] = s.t
+            t = s.t
+            e.attrib[ 't' ] = ( t if isinstance(t,str) else t.n  )
         if hasattr( s, 'doc' ):
             e.attrib[ 'doc' ] = s.doc
         ee = Et.SubElement( e, 'v' )
-        _store_obj( ee, dict_get_sorted( s.b, lambda v: v.b ) )
+        _store_obj( ee, nl( dict_get_sorted( s.b, lambda v: v.b ) ) )
+    def xml_load( s, *a ):
+        super().xml_load( *a )
+        if hasattr( s, 'ne' ): s.ne = int( s.ne )
+        if hasattr( s, 'l' ): s.l = int( s.l )
+        s.b = {i.n:i for i in s.v}
+        return s
     def get_descr( s ):
         try:
             return '{}({})'.format( s.n, s.doc )
@@ -80,43 +105,63 @@ class struct_field( xml_storable ):
 class struct_descr( xml_storable ):
     def __init__( s ):
         s.l = 0
-        s.t = {}
-        s.tt = []
+        s.t = nl()
     def add( s, f ):
         f.off = s.l
         s.l += f.l
-        s.t[f.n] = f
+        s.t.append( f )
     def union_fields( s, tp ): # called once for single object
         un = None
-        for i in s.tt:
-            if un == None:
+        _ot = s.t
+        s.t = nl()
+        s.l = 0
+        for i in _ot:
+            if un:
+                if ( i.n.startswith( lj[0] ) and i.n.endswith( lj[1] ) ) or hasattr(i,'reserved'):
+                    un.join( i )
+                else:
+                    s.add( un )
+                    un = None
+            if not un:
                 for j in tp:
                     if i.n.startswith( j[0] ) and i.n.endswith( j[1] ):
                         un = i
-                        s.t.pop( i.n )
                         lj = j
                         i.n = j[0]+j[1]
-                        s.add( i )
                         break;
-            else:
-                if ( i.n.startswith( lj[0] ) and i.n.endswith( lj[1] ) ) or hasattr(i,'reserved'):
-                    s.t.pop( i.n )
-                    un.join( i )
-                else: un = None
-        delattr( s, 'tt' )
+                if not un:
+                    s.add( i )
+        if un: s.add( un )
     def clr( s ):
         if hasattr( s, 'tt' ): delattr( s, 'tt' )
+    def update_load( s, p=None ):
+        if p:
+            for i in s.t:
+                if hasattr( i, 't' ):
+                    if isinstance( i.t, str ):
+                        i.t = p.get_periph( i.t )
+                    i.l = i.t.l
+        s.l = 0
+        for i in s.t:
+            i.off = s.l
+            s.l += i.size()
+        s._t = {i.n:i for i in s.t}
+    def xml_store( s, e ):
+        super().xml_store( e )
+        for i in e:
+            if i.tag == 'l':
+                e.remove( i )
+                break
 
 class periph_obj( xml_storable ):
     def gen_setup( s, out, fn, fl, mode ): # TODO: faster version in C++
-        f = s.t.t[ fn ]
+        f = s.t._t[ fn ]
         out.putl('   /* {}: {}  */'.format(f.get_descr(),fl))
         zu = mode.zu # zero used
         zz = mode.zz # zero all
         if zz: zu=False
-        f.make_array() # !!!!!!
         vv = [0]*f.ne
-        nbits = f.le*8
+        nbits = f.l*8
         just_ones = (1<<nbits)-1
         if zu:
             uu = [just_ones]*f.ne
@@ -131,7 +176,7 @@ class periph_obj( xml_storable ):
         pp =( '=' if zz or mode.ww else '|=' ) # preserve previous
         vol = ( 'volatile ' if mode.vol else '' )
         for it in range(len(vv)): # TODO: preserve current vals
-            fp = '( *({}uint{}_t*){})'.format(vol, f.le*8, hex(fpos+it*f.le))
+            fp = '( *({}uint{}_t*){})'.format(vol, f.l*8, hex(fpos+it*f.l))
             nv = None
             av = None
             if zz or vv[it]!=0:
@@ -146,18 +191,18 @@ class periph_obj( xml_storable ):
                 out.putl('{}&={};'.format(fp, av)) # TODO: negate flag
     def __init__( s ):
         a=0
+    def xml_store( s, e ):
+        e.attrib['t'] = s.t.n
+        e.attrib['a'] = hex(s.a)
+    def xml_load( s, e, cm ):
+        s.t = e.attrib['t']
+        s.a = int(e.attrib['a'],16)
+        return s
 
 class proc_cfg( xml_storable):
-    def __init__( s, cm=None, cfg_dir=None, f=None, pcfg=None ):
-        s.clear_data()
-        s._cm = cm
-        s._pcfg = pcfg
-        s._cfg_dir = cfg_dir
-        if f:
-            s.load_file( f, modules[ __name__ ] )
     def clear_data( s ):
         s.periph_data = {}
-        s.types = {}
+        s.types = nd()
         s.vars = {}
     def import_cfg( s, n ):
         try:
@@ -168,7 +213,7 @@ class proc_cfg( xml_storable):
             return s._pcfg.import_cfg( n )
     def get_periph( s, n ): # TODO: cache
         try:
-            return s.periph[ n ]
+            return s.types[ n ]
         except KeyError:
             return s._pcfg.get_periph( n )
     def get_var( s, n ): # TODO: cache
@@ -176,4 +221,19 @@ class proc_cfg( xml_storable):
             return s.vars[n]
         except KeyError:
             return s._pcfg.get_var( n )
+    def xml_load( s, *a ):
+        super().xml_load( *a )
+        for n,i in s.types.items():
+            i.n = n
+            i.update_load( s )
+        for n,i in s.periph_data.items():
+            s.periph_data[n].t = s.get_periph( i.t )
+        return s
+
+def load_proc_cfg( cm=None, cfg_dir=None, f=None, pcfg=None ):
+    r = load_file( f, modules[__name__] ) if f else proc_cfg()
+    r._cm = cm
+    r._pcfg = pcfg
+    r._cfg_dir = cfg_dir
+    return r
 
