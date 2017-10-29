@@ -89,6 +89,7 @@ class xml_storable:
             if not n.startswith('_'):
                 try:
                     i._p = s
+                    i._n = n
                     i.fix_parent()
                 except (KeyError, AttributeError):
                     pass
@@ -679,6 +680,9 @@ class func( xml_storable ):
         v = cb.get_active()
         setattr( s, nc, v )
         if ucb: ucb()
+    def gen_code( s ):
+        getattr( s._p, s._n )( decl=True )
+        args.update({n:v(s._p) for n,v in params}) # TODO: comment ?
 
 class func_setup:
     def obj( s ):

@@ -42,8 +42,53 @@ class processor( processor ): # TODO: processor parent class
 #        return write_ctx( s.get_periph( pd.pname() ), s )
     # get periph regs ?
 
+class param_t:
+    def __call__( s, o ):
+        v = getattr( s, 'dv', None )
+        try:
+            return ( # TODO: type, link ?
+                    getattr( o, v, None ) if v.startswith('$') else v
+                )
+        except AttributeError:
+            return v
+    def isp( s ):
+        return getattr( s, 'p', None )
+
+def gen_func( f, *params ): # TODO: name prefix ?
+    def r( s, **args ):
+        try:
+            c = getattr( s, '_fcfg_'+f.__name__ )
+        except AttributeError:
+            c = ; # blank func config
+            setattr( s, '_fcfg_'+f.__name__, c ) # TODO: fixing parameter function
+        # TODO: unenabled function warning
+        fn = '{}_{}'.format( s.n, f.__name__ ) # TODO: put func in class ?
+        if args.get('decl',None):
+            ln('{} {}({}){{'.format( # TODO: attrs ?
+                'void', # TODO: configure return type
+                fn,
+                ','.join([
+                    '{} {}'.format(str(v.t),n) for n,v in params
+                ])
+            )
+            f(s,**{ n:( if n in args else v(s)) for n,v in params})
+            ln('}')
+        else:
+            args.update({n:v(s) for n,v in params if n not in args}) # TODO: force inline on const change
+            if args.get('inline',None):
+                return f( s, **args ) # TODO: conversion ? return type ?
+            v = ','.join([ args['n'] for n,v in params if v.isp() ]) # TODO: multiple func versions
+            if args.get('vr',None):
+                vr = args['vr']
+                ln('{} {} = {}({});'.format(vr.t,vr.n,s.n,v))
+                return vr
+            else:
+                ln('{}({});'.format(fn,v))
+    return r
+
 class gpio( config_parent ):
-    def gen_setup( s, param ): # TODO: parametrized setup ?
+    @gen_func()
+    def gen_setup( s ): # TODO: parametrized setup ?
         cr = {}
         bsrr = {}
         for e in s.children:
@@ -105,9 +150,9 @@ class gpio_pin( config_parent ):
             ( 'out_mode', 'Output mode', (('push-pull',0),('open-drain',1)), { 'm':('afio','out') } ),
             ( 'spd', 'Output speed', ( ('2MHz',2), ('10MHz',1), ('50MHz',3) ), { 'm':('afio','out') } ),
             ( 'in_mode', 'Input mode', ('up','down','analog','floating'), { 'm':('in') } ),
-            ( 'val', 'Get value', FS(), { 'm':('afio','in') } ),
-            ( 'vset', 'Set high', FS(), { 'm':('afio','out') } ),
-            ( 'vreset', 'Set low', FS(), { 'm':('afio','out') } ),
+            ( '_fcfg_val', 'Get value', FS(), { 'm':('afio','in') } ),
+            ( '_fcfg_vset', 'Set high', FS(), { 'm':('afio','out') } ),
+            ( '_fcfg_vreset', 'Set low', FS(), { 'm':('afio','out') } ),
             ( 'test_freq', 'Test freq', freq_setup( 'test_freq2', (1, 2, 3), (1, 2, 3) ), { 'm':('afio','out') } ),
             ( 'test_sel', 'Test selection', objsel_setup( '.', 'pin_cfg', 'gpio_pin'), { 'm':('afio','out') } ),
         ],
