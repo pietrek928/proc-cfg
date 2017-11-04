@@ -200,6 +200,8 @@ class periph_obj( xml_storable ):
         return s
 
 class proc_cfg( xml_storable):
+    def __init__( s ):
+        s.clear_data()
     def clear_data( s ):
         s.periph_data = {}
         s.types = nd()

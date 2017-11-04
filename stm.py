@@ -59,7 +59,7 @@ def gen_func( f, *params ): # TODO: name prefix ?
         try:
             c = getattr( s, '_fcfg_'+f.__name__ )
         except AttributeError:
-            c = ; # blank func config
+            c = None; # blank func config
             setattr( s, '_fcfg_'+f.__name__, c ) # TODO: fixing parameter function
         # TODO: unenabled function warning
         fn = '{}_{}'.format( s.n, f.__name__ ) # TODO: put func in class ?
@@ -70,8 +70,8 @@ def gen_func( f, *params ): # TODO: name prefix ?
                 ','.join([
                     '{} {}'.format(str(v.t),n) for n,v in params
                 ])
-            )
-            f(s,**{ n:( if n in args else v(s)) for n,v in params})
+            ))
+            f(s,**{ n:(args[n] if n in args else v(s)) for n,v in params})
             ln('}')
         else:
             args.update({n:v(s) for n,v in params if n not in args}) # TODO: force inline on const change
@@ -87,7 +87,7 @@ def gen_func( f, *params ): # TODO: name prefix ?
     return r
 
 class gpio( config_parent ):
-    @gen_func()
+    @gen_func
     def gen_setup( s ): # TODO: parametrized setup ?
         cr = {}
         bsrr = {}

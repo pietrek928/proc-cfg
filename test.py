@@ -7,6 +7,8 @@ w = gui.Gtk.Window( title='aaaaaaaa' )
 p2 = stm.gpio_pin()
 p2.test_freq2 = 8e6
 p = stm.gpio_pin()
+p.n='p1'
+p2.n='p2'
 p.test_freq2 = 8e6
 p.p=p
 p.p2=p2
@@ -16,7 +18,8 @@ p2.p3=p
 p2.tiles = True
 p2.tiles_edit = True
 p.n='p1'; p2.n='p2'
-w.add( p.show() )
+w.add( p.show(show_tiles=True) )#"""
+#w.add(p.render_tree(sel_cb=print))
 w.connect("destroy",gui.Gtk.main_quit)
 w.show_all()
 

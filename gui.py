@@ -101,21 +101,79 @@ class xml_storable:
         _xml_store( s.__dict__.items(), e )
 
 def iconview_tp_cb( iv, x, y, kbd, tp ):
-    p = iv.get_path_at_pos( x, y )
-    if not p: return False
-    m = iv.get_model()
-    e = m.get_value( m.get_iter( p ), 2 )
-    tp.set_text( e.get_tooltip() )
-    iv.set_tooltip_cell( tp, p )
+    try:
+        p = iv.get_path_at_pos( x, y )[0]
+        m = iv.get_model()
+        e = m.get_value( m.get_iter( p ), 0 )
+        tp.set_text( e.get_tooltip() )
+        iv.set_tooltip_cell( tp, p )
+    except (AttributeError, TypeError):
+        return False
     return True
-    #iv = o.iv
-    #for (i,pp) in o.tooltip_tab:
-        #iv.set_tooltip_cell( i, pp )
 
 def iconview_ac_cb( iv, p ):
     m = iv.get_model()
-    e = m.get_value( m.get_iter( p ), 2 )
-    e.show_window()
+    e = m.get_value( m.get_iter( p ), 0 )
+    e.show_window() # TODO: callback
+    return True
+
+def treeview_tp_cb( tv, x, y, kbd, tp ):
+    try:
+        p = tv.get_path_at_pos( x, y )[0]
+        m = tv.get_model()
+        e = m.get_value( m.get_iter( p ), 0 )
+        tp.set_text( e.get_tooltip() )
+        tv.set_tooltip_row( tp, p )
+    except (AttributeError, TypeError):
+        return False # TODO: debug
+    return True
+
+def treeview_exp_cb( tv, it, p ):
+    try:
+        m = tv.get_model()
+        e = m.get_value( it, 0 )
+        n = m.iter_n_children( it )
+        e.tload( m, it )
+        ci = m.iter_children( it )
+        while n and m.remove( ci ):
+            n -= 1
+    except (AttributeError, TypeError) as e:
+        print(e)
+        return False # TODO: debug
+    return True
+
+def treeview_col_cb( tv, it, p ):
+    try:
+        m = tv.get_model()
+        e = m.get_value( it, 0 )
+        ci = m.iter_children( it )
+        while m.remove( ci ):
+            pass
+        e.tload_def( m, it )
+    except (AttributeError, TypeError) as e:
+        return False # TODO: debug
+    return True
+
+def treeview_act_cb( tv, p, c, cb ):
+    try:
+        m = tv.get_model()
+        e = m.get_value( m.get_iter( p ), 0 )
+        tv.expand_row( p, False )
+        cb( e )
+    except (AttributeError, TypeError) as e:
+        print(e)
+        return False # TODO: debug
+    return True
+
+def treeview_sel_cb( tv, cb ):
+    try:
+        p,c = tv.get_cursor()
+        m = tv.get_model()
+        e = m.get_value( m.get_iter( p ), 0 )
+        cb( e )
+    except (AttributeError, TypeError) as e:
+        print(e)
+        return False # TODO: debug
     return True
 
 def cnv_num( n ):
@@ -147,8 +205,13 @@ class link_path: # TODO: move to config_parent
                     try:
                         s = getattr( s, i )
                     except AttributeError: # TODO: cut recursion, better error
-                        if s._l:
-                            s = s._p.get( s._l )
+                        s = s._p.get( s._l )
+                        while True:
+                            try:
+                                s = getattr( s, i )
+                                break
+                            except AttributeError:
+                                s = s._p.get( s._l )
             return s
         except AttributeError:
             raise LookupError( 'no path \'%s\'' % l )
@@ -165,16 +228,20 @@ class link_path: # TODO: move to config_parent
                     try:
                         s = getattr( s, i )
                     except AttributeError: # TODO: cut recursion, better error
-                        if s._l:
-                            s = s._p.get( s._l )
+                        s = s._p.get( s._l )
+                        while True:
+                            try:
+                                s = getattr( s, i )
+                                break
+                            except AttributeError:
+                                s = s._p.get( s._l )
             return s
         except AttributeError:
             raise LookupError( 'no path \'%s\'' % l )
 
     def get_dep( s, l, p ):
-        r = None
         try:
-            if s._p is p: r = s
+            if s._p is p: return s
             for i in l.split( '/' ):
                 if i.startswith( '.' ):
                     try: # TODO: nop default ?
@@ -185,10 +252,15 @@ class link_path: # TODO: move to config_parent
                     try:
                         s = getattr( s, i )
                     except AttributeError: # TODO: cut recursion, better error
-                        if s._l:
-                            s = s._p.get( s._l )
-                if s._p is p: r = s
-            return r
+                        s = s._p.get( s._l )
+                        while True:
+                            try:
+                                s = getattr( s, i )
+                                break
+                            except AttributeError:
+                                if s._p is p: return s
+                                s = s._p.get( s._l )
+            return s
         except AttributeError:
             raise LookupError( 'no path \'%s\'' % l )
 
@@ -383,11 +455,11 @@ class config_parent( link_path, xml_storable ):
         for n in l:
             del d[n]
 
-    def find_deps( s ):
-        r = { s.get_dep( l ) for l in s.deps() }
+    def find_deps( s, p ):
+        r = { s.get_dep( l, s ) for l in s.deps() }
         for i in s.__dict__.values():
             try:
-                r |= i.find_deps()
+                r |= i.find_deps( p )
             except AttributeError:
                 pass
         return r
@@ -401,7 +473,7 @@ class config_parent( link_path, xml_storable ):
         for n,i in s.__dict__.items():
             if i in e:
                 try:
-                    d[i] = set( i.find_deps() ) & e
+                    d[i] = set( i.find_deps( s ) ) & e
                     od[i] = n
                 except AttributeError:
                     pass
@@ -562,7 +634,38 @@ class config_parent( link_path, xml_storable ):
                 r += '\n'
         return r
 
-    def show( s, pb=None ):
+    def render_tree( s, pb=None, sel_cb=None, act_cb=None ):
+        s.rollup()
+        if not pb:
+            pb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            pb.connect( 'parent-set', s.parent_set_cb )
+        s._pb = pb
+
+        sw = Gtk.ScrolledWindow()
+        #sw.set_policy(Gtk.POLICY_AUTOMATIC, Gtk.POLICY_AUTOMATIC)
+        #pb.add(sw)
+        pb = sw
+
+        ts = Gtk.TreeStore(object, str)
+        s.trow( ts, None )
+
+        tv = Gtk.TreeView(model=ts)
+        tv.append_column(
+                Gtk.TreeViewColumn('Name', Gtk.CellRendererText(), text=1)
+        )
+        tv.set_headers_visible(False) # FIXME header breaks get_path_at_pos
+        tv.set_property( 'has-tooltip', True )
+        #tv.set_property( 'hover-expand', True )
+        tv.connect( 'query-tooltip', treeview_tp_cb )
+        tv.connect( 'row-expanded', treeview_exp_cb )
+        tv.connect( 'row-collapsed', treeview_col_cb )
+        # tv.connect( 'expand-collapse-cursor-row', treeview_cur_exp_cb ) # TODO: left, right in css
+        if sel_cb: tv.connect( 'cursor-changed', treeview_sel_cb, sel_cb )
+        if act_cb: tv.connect( 'row-activated', treeview_act_cb, act_cb )
+        sw.add(tv)
+        return pb
+
+    def show( s, pb=None, show_tiles=False ): # TODO: some renderers
         s.rollup()
         if not pb:
             pb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -600,16 +703,16 @@ class config_parent( link_path, xml_storable ):
         d = s.__dict__
         if not hasattr( s, 'child_order' ): # TODO: support links here ?
             s.child_order = s.find_child_order() # xml_list( [ n for n,i in d if isinstance( i, config_parent ) ] )
-        if s.hasopt('tiles'):
-            il = Gtk.ListStore( Pixbuf, str, object )
+        if s.hasopt('tiles') and show_tiles:
+            il = Gtk.ListStore( object, str, Pixbuf )
             iv = Gtk.IconView()
             iv.set_model( il )
-            iv.set_pixbuf_column( 0 )
+            iv.set_pixbuf_column( 2 )
             iv.set_text_column( 1 )
             for n in s.child_order:
                 i = d[n]
                 pixbuf = Gtk.IconTheme.get_default().load_icon(i.get_icon(), 64, 0) # TODO: icon from class
-                pp = il.get_path( il.append([pixbuf, i.n, i ]) )
+                pp = il.get_path( il.append([i, i.n, pixbuf]) )
             iv.set_property( 'has-tooltip', True )
             iv.connect( 'query-tooltip', iconview_tp_cb ) # TODO: method from class
             iv.connect( 'item-activated', iconview_ac_cb )
@@ -633,12 +736,57 @@ class config_parent( link_path, xml_storable ):
         pb.show_all()
         return pb
 
-    def tree_node( s, t, p ):
-        tn = t.append( p, [ i.n, s ] ) # TODO: icon
-        s._tn = tn
+    def trow( s, t, p ):
+        tn = t.append( p, [ s, s.n ] ) # TODO: icon
+        s.tload_def( t, tn )
+        #s._tn = tn
 
-class freq( xml_storable ):
+    def tload_def( s, t, tn ):
+        t.append( tn, [ None, 'Loading...' ] ) # TODO: remember expanded
+
+    def tload( s, t, tn ):
+        for i in s.__dict__.values():
+            try:
+                i.trow( t, tn )
+            except AttributeError:
+                pass
+
+class link( xml_storable ):
     def __init__( s ):
+        s._l = '.'
+    def gen_setup( s ):
+        o = s._p.get( s.l )
+        if hasattr( o, 'gen_setup' ):
+            o.gen_setup()
+    def xml_store( s, e ):
+        try:
+            e.attrib[ 'l' ] = s._l
+            e.attrib[ 's' ] = s._s
+        except AttributeError:
+            pass
+    def imported( s ):
+        try:
+            c = s._p.load_cfg( c._cfg )
+            s._p.link_reconfigure( l, c )
+        except AttributeError:
+            pass
+    def reconfigure( s, c ): # TODO: configure action/rules
+        l = s._l
+        if hasattr( c, 'cfg_name' ):
+            c = s._p.load_cfg( c.cfg_name )
+            s._p.link_reconfigure( l, c )
+        else:
+            s.set( s._l, c )
+    def xml_load( s, e, cm ):
+        try:
+            s._l = e.attrib[ 'l' ]
+            s._s = e.attrib[ 's' ]
+        except AttributeError:
+            pass
+
+class freq( link ):
+    def __init__( s ):
+        super().__init__()
         s.mul = 1
         s.div = 1
     def update( s ):
@@ -697,39 +845,6 @@ class func_setup:
             r.append( bt )
         b_en.connect('clicked', fo.update_cb, 'en', fo._p.update_all)
         return r
-
-class link( xml_storable ):
-    def __init__( s ):
-        s._l = '.'
-    def gen_setup( s ):
-        o = s._p.get( s.l )
-        if hasattr( o, 'gen_setup' ):
-            o.gen_setup()
-    def xml_store( s, e ):
-        try:
-            e.attrib[ 'l' ] = s._l
-            e.attrib[ 's' ] = s._s
-        except AttributeError:
-            pass
-    def imported( s ):
-        try:
-            c = s._p.load_cfg( c._cfg )
-            s._p.link_reconfigure( l, c )
-        except AttributeError:
-            pass
-    def reconfigure( s, c ): # TODO: configure action/rules
-        l = s._l
-        if hasattr( c, 'cfg_name' ):
-            c = s._p.load_cfg( c.cfg_name )
-            s._p.link_reconfigure( l, c )
-        else:
-            s.set( s._l, c )
-    def xml_load( s, e, cm ):
-        try:
-            s._l = e.attrib[ 'l' ]
-            s._s = e.attrib[ 's' ]
-        except AttributeError:
-            pass
 
 class objsel_setup:
     def __init__( s, l, cfgn, cn ):
