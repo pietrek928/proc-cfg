@@ -18,8 +18,8 @@ p2.p3=p
 p2.tiles = True
 p2.tiles_edit = True
 p.n='p1'; p2.n='p2'
-w.add( p.show(show_tiles=True) )#"""
-#w.add(p.render_tree(sel_cb=print))
+#w.add( p.show(show_tiles=True) )#"""
+w.add(p.render_tree(sel_cb=print))
 w.connect("destroy",gui.Gtk.main_quit)
 w.show_all()
 

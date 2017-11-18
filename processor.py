@@ -33,7 +33,8 @@ class processor( config_parent ):
         return write_ctx( s.get_periph( pd.pname() ), s )
     def import_cfg( s, n ): # TODO: cache
         s._proc_cfg.import_cfg( n )
-    # get periph regs ?
+    def gen_code( s ):
+        super().gen_code()
 
 class write_ctx:
     def __init__( s, p, cfg, dmode='ww' ):

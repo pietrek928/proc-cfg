@@ -43,6 +43,11 @@ class processor( processor ): # TODO: processor parent class
     # get periph regs ?
 
 class param_t:
+    def __init__( s, dv=None, p=False ):
+        if p:
+            s.p = p
+        if dv is not None:
+            d.dv = dv
     def __call__( s, o ):
         v = getattr( s, 'dv', None )
         try:
@@ -53,9 +58,11 @@ class param_t:
             return v
     def isp( s ):
         return getattr( s, 'p', None )
+P = param_t
 
-def gen_func( f, *params ): # TODO: name prefix ?
-    def r( s, **args ):
+# TODO: wctx, force inline
+def gen_func( f, *params ): # TODO: name prefix ? object, class, namespace ?
+    def r( s, **args ): # c / c++ selection ?
         try:
             c = getattr( s, '_fcfg_'+f.__name__ )
         except AttributeError:
@@ -87,27 +94,31 @@ def gen_func( f, *params ): # TODO: name prefix ?
     return r
 
 class gpio( config_parent ):
-    @gen_func
-    def gen_setup( s ): # TODO: parametrized setup ?
+    @gen_func(
+            ('mode', P('in')),
+            ('out_mode', P(0)),
+            ('in_mode', P('floating')),
+            ('out_mode', P(0)), # TODO: enum class ?
+    )
+    def gen_setup( s, **P ): # TODO: parametrized setup ?
         cr = {}
         bsrr = {}
         for e in s.children:
             nn = str(e.num)
-            if hasattr( e, 'm' ):
-                m = e.m
-                if m in ( 'out', 'afio' ):
-                    cr['MODE'+nn] = e.get_val( 'spd', 2 )
-                    cr['CNF'+nn] =  ( 0 if m=='in' else 2 )+e.get_val( 'out_mode', 0 )
-                    if hasattr( e, 'v' ): bsrr[( 'BR' if e.v==0 else 'BS' )+nn] = 1
-                    if m == 'afio': cr['CNF'+nn] |= 0x02
-                elif m == 'in':
-                    cr['MODE'+nn] = 0
-                    im = e.get_val( 'in_mode', 'floating' )
-                    if im == 'analog': cr['CNF'+n] = 0
-                    elif im == 'floating': cr['CNF'+n] = 1
-                    else:
-                        cr['CNF'+nn] = 2
-                        bsrr[( 'BR' if im=='down' else 'BS' )+nn] = 1
+            m = e.get_val( 'm', P('mode') ) # TODO: unify
+            if m in ( 'out', 'afio' ):
+                cr['MODE'+nn] = e.get_val( 'spd', 2 )
+                cr['CNF'+nn] =  ( 0 if m=='in' else 2 )+e.get_val( 'out_mode', 0 )
+                if hasattr( e, 'v' ): bsrr[( 'BR' if e.v==0 else 'BS' )+nn] = 1
+                if m == 'afio': cr['CNF'+nn] |= 0x02
+            elif m == 'in':
+                cr['MODE'+nn] = 0
+                im = e.get_val( 'in_mode', 'floating' )
+                if im == 'analog': cr['CNF'+n] = 0
+                elif im == 'floating': cr['CNF'+n] = 1
+                else:
+                    cr['CNF'+nn] = 2
+                    bsrr[( 'BR' if im=='down' else 'BS' )+nn] = 1
         ctx = s.wctx()
         ctx.clk_start()
         ctx.wset( 'CRL' , cr )
