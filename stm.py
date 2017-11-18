@@ -47,7 +47,7 @@ class param_t:
         if p:
             s.p = p
         if dv is not None:
-            d.dv = dv
+            s.dv = dv
     def __call__( s, o ):
         v = getattr( s, 'dv', None )
         try:
@@ -61,37 +61,39 @@ class param_t:
 P = param_t
 
 # TODO: wctx, force inline
-def gen_func( f, *params ): # TODO: name prefix ? object, class, namespace ?
-    def r( s, **args ): # c / c++ selection ?
-        try:
-            c = getattr( s, '_fcfg_'+f.__name__ )
-        except AttributeError:
-            c = None; # blank func config
-            setattr( s, '_fcfg_'+f.__name__, c ) # TODO: fixing parameter function
-        # TODO: unenabled function warning
-        fn = '{}_{}'.format( s.n, f.__name__ ) # TODO: put func in class ?
-        if args.get('decl',None):
-            ln('{} {}({}){{'.format( # TODO: attrs ?
-                'void', # TODO: configure return type
-                fn,
-                ','.join([
-                    '{} {}'.format(str(v.t),n) for n,v in params
-                ])
-            ))
-            f(s,**{ n:(args[n] if n in args else v(s)) for n,v in params})
-            ln('}')
-        else:
-            args.update({n:v(s) for n,v in params if n not in args}) # TODO: force inline on const change
-            if args.get('inline',None):
-                return f( s, **args ) # TODO: conversion ? return type ?
-            v = ','.join([ args['n'] for n,v in params if v.isp() ]) # TODO: multiple func versions
-            if args.get('vr',None):
-                vr = args['vr']
-                ln('{} {} = {}({});'.format(vr.t,vr.n,s.n,v))
-                return vr
+def gen_func( *params ): # TODO: name prefix ? object, class, namespace ?
+    def decor( f ):
+        def r( s, **args ): # c / c++ selection ?
+            try:
+                c = getattr( s, '_fcfg_'+f.__name__ )
+            except AttributeError:
+                c = None; # blank func config
+                setattr( s, '_fcfg_'+f.__name__, c ) # TODO: fixing parameter function
+            # TODO: unenabled function warning
+            fn = '{}_{}'.format( s.n, f.__name__ ) # TODO: put func in class ?
+            if args.get('decl',None):
+                ln('{} {}({}){{'.format( # TODO: attrs ?
+                    'void', # TODO: configure return type
+                    fn,
+                    ','.join([
+                        '{} {}'.format(str(v.t),n) for n,v in params
+                    ])
+                ))
+                f(s,**{ n:(args[n] if n in args else v(s)) for n,v in params})
+                ln('}')
             else:
-                ln('{}({});'.format(fn,v))
-    return r
+                args.update({n:v(s) for n,v in params if n not in args}) # TODO: force inline on const change
+                if args.get('inline',None):
+                    return f( s, **args ) # TODO: conversion ? return type ?
+                v = ','.join([ args['n'] for n,v in params if v.isp() ]) # TODO: multiple func versions
+                if args.get('vr',None):
+                    vr = args['vr']
+                    ln('{} {} = {}({});'.format(vr.t,vr.n,s.n,v))
+                    return vr
+                else:
+                    ln('{}({});'.format(fn,v))
+        return r
+    return decor
 
 class gpio( config_parent ):
     @gen_func(

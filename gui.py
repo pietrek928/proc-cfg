@@ -176,6 +176,17 @@ def treeview_sel_cb( tv, cb ):
         return False # TODO: debug
     return True
 
+def view_btn_cb( tv, ev ):
+    try:
+        p = tv.get_path_at_pos( ev.x, ev.y )[0]
+        m = tv.get_model()
+        e = m.get_value( m.get_iter( p ), 0 )
+        print(ev.type, ev.button, ev.state)
+        e.ev_act[(ev.type, ev.button, ev.state)] ( e, ev ) # TODO: different action depending on widget
+        return True
+    except (AttributeError, TypeError) as e:
+        print(e)
+
 def cnv_num( n ):
     n = float( n )
     k = ''
@@ -398,6 +409,10 @@ def gen_proc_view( t ):
 class config_parent( link_path, xml_storable ):
     #cp = copy.deepcopy TODO: other copy, ignore some attrs
 
+    ev_act = {
+            (Gdk.EventType.BUTTON_PRESS, 3, 0) : lambda e, ev:e.menu().popup_at_pointer( ev )
+    }
+
     def get_icon( s ):
         return getattr( s, 'icon', 'edit-copy' )
 
@@ -514,7 +529,7 @@ class config_parent( link_path, xml_storable ):
             s.show( pb )
 
     def close( s ):
-        delattr( s, '_pb' )
+        s.__dict__.pop( '_pb', None )
 
     def editing( s ):
         return hasattr( s, '_pb' )
@@ -660,6 +675,7 @@ class config_parent( link_path, xml_storable ):
         tv.connect( 'row-expanded', treeview_exp_cb )
         tv.connect( 'row-collapsed', treeview_col_cb )
         # tv.connect( 'expand-collapse-cursor-row', treeview_cur_exp_cb ) # TODO: left, right in css
+        tv.connect( 'button-press-event', view_btn_cb )
         if sel_cb: tv.connect( 'cursor-changed', treeview_sel_cb, sel_cb )
         if act_cb: tv.connect( 'row-activated', treeview_act_cb, act_cb )
         sw.add(tv)
@@ -700,9 +716,9 @@ class config_parent( link_path, xml_storable ):
                     l = f.disp( d, ucb )
                     for c in l: b.add( c )
             elif hasattr( s, n ): delattr( s, n )
-        d = s.__dict__
         if not hasattr( s, 'child_order' ): # TODO: support links here ?
             s.child_order = s.find_child_order() # xml_list( [ n for n,i in d if isinstance( i, config_parent ) ] )
+        d = s.__dict__
         if s.hasopt('tiles') and show_tiles:
             il = Gtk.ListStore( object, str, Pixbuf )
             iv = Gtk.IconView()
@@ -717,6 +733,7 @@ class config_parent( link_path, xml_storable ):
             iv.connect( 'query-tooltip', iconview_tp_cb ) # TODO: method from class
             iv.connect( 'item-activated', iconview_ac_cb )
             iv.connect( 'drag-data-get', s.iv_drag_get )
+            iv.connect( 'button-press-event', view_btn_cb )
             targets = Gtk.TargetList.new([])
             targets.add_image_targets(1, True)
             iv.enable_model_drag_source( Gdk.ModifierType.BUTTON1_MASK, [], Gdk.DragAction.MOVE )
@@ -750,6 +767,12 @@ class config_parent( link_path, xml_storable ):
                 i.trow( t, tn )
             except AttributeError:
                 pass
+    def menu( s ):
+        m = Gtk.Menu()
+        m.append(Gtk.ImageMenuItem("Yep it works!"))
+        m.append(Gtk.ImageMenuItem(":)"))
+        m.show_all()
+        return m
 
 class link( xml_storable ):
     def __init__( s ):
