@@ -649,6 +649,14 @@ class config_parent( link_path, xml_storable ):
                 r += '\n'
         return r
 
+    def get_exp( s ):
+        return [ i for i in s.__dict__.values():
+                if hasattr( i, 'expander_cb' ) ]
+
+    def get_ivs( s ):
+        return [ i for i in s.__dict__.values():
+                if hasattr( i, 'iv_data' ) ]
+
     def render_tree( s, pb=None, sel_cb=None, act_cb=None ):
         s.rollup()
         if not pb:
