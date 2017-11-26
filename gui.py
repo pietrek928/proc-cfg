@@ -225,7 +225,7 @@ class link_path: # TODO: move to config_parent
                                 s = s._p.get( s._l )
             return s
         except AttributeError:
-            raise LookupError( 'no path \'%s\'' % l )
+            raise LookupError( 'no path \'%s\'' % ('/'.join(t)) )
 
     def get( s, l ):
         try:
@@ -246,6 +246,10 @@ class link_path: # TODO: move to config_parent
                                 break
                             except AttributeError:
                                 s = s._p.get( s._l )
+            try:
+                s = s._p.get( s._l )
+            except AttributeError:
+                pass
             return s
         except AttributeError:
             raise LookupError( 'no path \'%s\'' % l )
@@ -575,13 +579,13 @@ class config_parent( link_path, xml_storable ):
         if isinstance( c, str ):
             c = s.load_cfg( c )
         if not n:
-            n = c.default_name( s )
+            n = c.default_name( s ) # !!!!
         try:
             v = getattr( s, n )
-            if v.__class__ is c.__class__:
+            if v.__class__ is c.__class__: # FIXME: must be strict comparison ?
                 c.reconfigure( c )
             else:
-                setattr( s, n, c )
+                setattr( s, n, c ) # TODO: copy config ?
         except AttributeError:
             setattr( s, n, c )
 
@@ -657,6 +661,24 @@ class config_parent( link_path, xml_storable ):
         return [ i for i in s.__dict__.values():
                 if hasattr( i, 'iv_data' ) ]
 
+    def render( s, vn, *p, **pv ):
+        try:
+            vd = s._v
+            try:
+                getattr( s, 'hide_'+vn )( vd[vn] )
+                del vd[vn]
+            except (KeyError, AttributeError):
+                pass
+            #pb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL) TODO: scrolled window with box ?
+            #pb.connect( 'parent-set', s.parent_set_cb )
+            r = getattr( s, 'render_'+vn )( *p, **pv )
+            r.show_all();
+            vd[vn] = r
+            return r
+        except KeyError:
+            print('No render {} for {} object'.format(vn,s.__class__.__name__))
+            return None
+
     def render_tree( s, pb=None, sel_cb=None, act_cb=None ):
         s.rollup()
         if not pb:
@@ -689,7 +711,7 @@ class config_parent( link_path, xml_storable ):
         sw.add(tv)
         return pb
 
-    def show( s, pb=None, show_tiles=False ): # TODO: some renderers
+    def render_fields( s, pb=None, show_tiles=False ): # TODO: some renderers
         s.rollup()
         if not pb:
             pb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -787,17 +809,13 @@ class link( xml_storable ):
         s._l = '.'
     def gen_setup( s ):
         o = s._p.get( s.l )
-        if hasattr( o, 'gen_setup' ):
-            o.gen_setup()
-    def xml_store( s, e ):
         try:
-            e.attrib[ 'l' ] = s._l
-            e.attrib[ 's' ] = s._s
+            o.gen_setup()
         except AttributeError:
             pass
     def imported( s ):
         try:
-            c = s._p.load_cfg( c._cfg )
+            c = s._p.load_cfg( s._cfg )
             s._p.link_reconfigure( l, c )
         except AttributeError:
             pass
@@ -807,7 +825,14 @@ class link( xml_storable ):
             c = s._p.load_cfg( c.cfg_name )
             s._p.link_reconfigure( l, c )
         else:
-            s.set( s._l, c )
+            s.set( s._l, c ) # TODO: copy config ?
+    def xml_store( s, e ):
+        try:
+            e.attrib[ 'l' ] = s._l
+            e.attrib[ 's' ] = s._s
+            # _cfg
+        except AttributeError:
+            pass
     def xml_load( s, e, cm ):
         try:
             s._l = e.attrib[ 'l' ]
