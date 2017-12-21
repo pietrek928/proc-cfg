@@ -444,6 +444,12 @@ class config_parent( link_path, xml_storable ):
             return None
         return s
 
+    def get_arg( s, n ):
+        try:
+            return s._S[n]
+        except (AttributeError, KeyError):
+            return getattr( s, n )
+
 #    def load_cfg( s, vn, n ):
 #        c = s.get_cfg( 'import_cfg' )( n )
 #        setattr( s, vn, c )
@@ -654,11 +660,11 @@ class config_parent( link_path, xml_storable ):
         return r
 
     def get_exp( s ):
-        return [ i for i in s.__dict__.values():
+        return [ i for i in s.__dict__.values()
                 if hasattr( i, 'expander_cb' ) ]
 
     def get_ivs( s ):
-        return [ i for i in s.__dict__.values():
+        return [ i for i in s.__dict__.values()
                 if hasattr( i, 'iv_data' ) ]
 
     def render( s, vn, *p, **pv ):

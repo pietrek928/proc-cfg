@@ -4,6 +4,13 @@ from gui import *
 from processor import *
 from periph_class import load_proc_cfg
 
+# end plan:
+# - create processor
+# - add objects
+# - init clocks
+# - rest of the setup
+# - gen other functions
+
 ID = input_descr
 CD = config_descr
 FS = func_setup
@@ -26,11 +33,11 @@ class processor( processor ): # TODO: processor parent class
         pass
     def gen_setup( s ):
         for n,i in s.__dict__.items():
-            if hasattr( i, 'gen_setup' ) and not i.startswith( '_' ):
-                i.get_setup()
-    def __init__( s, n ):
+            if hasattr( i, 'gen_setup' ) and not n.startswith( '_' ):
+                i.gen_setup()
+    def __init__( s):#, n ):
         s.clr()
-        s.ol = G__get_ol( n )
+        #s.ol = G__get_ol( n )
         s.descr_t = {}
         s.modes = {}
     def clr( s ):
@@ -52,16 +59,17 @@ class param_t:
         v = getattr( s, 'dv', None )
         try:
             return ( # TODO: type, link ?
-                    getattr( o, v, None ) if v.startswith('$') else v
+                    getattr( o, v[1:], None ) if v.startswith('$') else v
                 )
         except AttributeError:
             return v
-    def isp( s ):
+    # def isp( s ):
         return getattr( s, 'p', None )
-P = param_t
+
+ln = lambda *a: print(*a)
 
 # TODO: wctx, force inline
-def gen_func( *params ): # TODO: name prefix ? object, class, namespace ?
+def gen_func( *params, rt='void' ): # TODO: name prefix ? object, class, namespace ?
     def decor( f ):
         def r( s, **args ): # c / c++ selection ?
             try:
@@ -69,31 +77,42 @@ def gen_func( *params ): # TODO: name prefix ? object, class, namespace ?
             except AttributeError:
                 c = None; # blank func config
                 setattr( s, '_fcfg_'+f.__name__, c ) # TODO: fixing parameter function
-            # TODO: unenabled function warning
             fn = '{}_{}'.format( s.n, f.__name__ ) # TODO: put func in class ?
-            if args.get('decl',None):
+            if args.get('decl',None): # TODO: ctx for ln
                 ln('{} {}({}){{'.format( # TODO: attrs ?
-                    'void', # TODO: configure return type
-                    fn,
+                    rt, fn,
                     ','.join([
                         '{} {}'.format(str(v.t),n) for n,v in params
                     ])
                 ))
-                f(s,**{ n:(args[n] if n in args else v(s)) for n,v in params})
+                s._S = { n:(args[n] if n in args else v(s)) for n,v in params}
+                rn = f(s)
+                if rt != 'void':
+                    ln('return {};'.format(rn))
                 ln('}')
             else:
-                args.update({n:v(s) for n,v in params if n not in args}) # TODO: force inline on const change
+                if not c.en:
+                    warn('function {} is used but not enabled'.format(fn))
+                for n,v in params:
+                    if n not in args:
+                        args[n] = v(s)
+                    else:
+                        if not v.isp(): # FIXME: what with undefined arguments ?
+                            args['inline'] = True
                 if args.get('inline',None):
+                    s._S = args
                     return f( s, **args ) # TODO: conversion ? return type ?
-                v = ','.join([ args['n'] for n,v in params if v.isp() ]) # TODO: multiple func versions
-                if args.get('vr',None):
-                    vr = args['vr']
-                    ln('{} {} = {}({});'.format(vr.t,vr.n,s.n,v))
-                    return vr
-                else:
+                v = ','.join([ args[n] for n,v in params if v.isp() ]) # TODO: multiple func versions
+                if vr != 'void' and args.get('rn', None):
                     ln('{}({});'.format(fn,v))
+                else:
+                    rn = args['rn']
+                    ln('{} {} = {}({});'.format(rt.t,rn.n,s.n,v))
+                    return rn
         return r
     return decor
+
+P = param_t
 
 class gpio( config_parent ):
     @gen_func(
@@ -102,20 +121,20 @@ class gpio( config_parent ):
             ('in_mode', P('floating')),
             ('out_mode', P(0)), # TODO: enum class ?
     )
-    def gen_setup( s, **P ): # TODO: parametrized setup ?
+    def gen_setup( s ): # TODO: parametrized setup ?
         cr = {}
         bsrr = {}
         for e in s.children:
             nn = str(e.num)
-            m = e.get_val( 'm', P('mode') ) # TODO: unify
+            m = e.get_arg( 'mode' ) # TODO: unify names ?
             if m in ( 'out', 'afio' ):
-                cr['MODE'+nn] = e.get_val( 'spd', 2 )
-                cr['CNF'+nn] =  ( 0 if m=='in' else 2 )+e.get_val( 'out_mode', 0 )
+                cr['MODE'+nn] = e.get_arg( 'spd', 2 )
+                cr['CNF'+nn] =  ( 0 if m=='in' else 2 )+e.get_arg( 'out_mode', 0 )
                 if hasattr( e, 'v' ): bsrr[( 'BR' if e.v==0 else 'BS' )+nn] = 1
                 if m == 'afio': cr['CNF'+nn] |= 0x02
             elif m == 'in':
                 cr['MODE'+nn] = 0
-                im = e.get_val( 'in_mode', 'floating' )
+                im = e.get_arg( 'in_mode', 'floating' )
                 if im == 'analog': cr['CNF'+n] = 0
                 elif im == 'floating': cr['CNF'+n] = 1
                 else:
@@ -158,7 +177,7 @@ class gpio_pin( config_parent ):
     descr = CD(
         'GPIO pin setup',
         [
-            ( 'm', 'Mode', ('out','in','afio'), {}, True ),
+            ( 'mode', 'Mode', ('out','in','afio'), {}, True ),
             ( 'afion', 'Afio number', (0,4), { 'm':'afio' } ),
             ( 'out_mode', 'Output mode', (('push-pull',0),('open-drain',1)), { 'm':('afio','out') } ),
             ( 'spd', 'Output speed', ( ('2MHz',2), ('10MHz',1), ('50MHz',3) ), { 'm':('afio','out') } ),
