@@ -1,0 +1,4 @@
+
+run:
+	python test.py
+
