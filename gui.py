@@ -100,6 +100,14 @@ class xml_storable:
     def xml_store( s, e ):
         _xml_store( s.__dict__.items(), e )
 
+    def cp( s ):
+        r = s.__class__()
+        r.__dict__.update({
+            n:v for n,v in s.__dict__items
+                if not n.startswith('_')
+        })
+        return r
+
 def iconview_tp_cb( iv, x, y, kbd, tp ):
     try:
         p = iv.get_path_at_pos( x, y )[0]
@@ -184,8 +192,9 @@ def view_btn_cb( tv, ev ):
         print(ev.type, ev.button, ev.state)
         e.ev_act[(ev.type, ev.button, ev.state)] ( e, ev ) # TODO: different action depending on widget
         return True
-    except (AttributeError, TypeError) as e:
-        print(e)
+    except (KeyError, AttributeError, TypeError) as e:
+        #print(e) #TODO: error logger
+        pass
 
 def cnv_num( n ):
     n = float( n )
@@ -198,12 +207,84 @@ def cnv_num( n ):
     else: nn='{:.4f}'.format(n)
     return nn+k
 
+class param_t:
+    def __init__( s, dv=None, p=False ):
+        if p:
+            s.p = p
+        if dv is not None:
+            s.dv = dv
+    def __call__( s, o ):
+        v = getattr( s, 'dv', None )
+        try:
+            return ( # TODO: type, link ?
+                    getattr( o, v[1:], None ) if v.startswith('$') else v
+                )
+        except AttributeError:
+            return v
+    def isp( s ):
+        return getattr( s, 'p', None )
+
+def setup_params( *params ):
+    def decor( f ):
+        def r( s, *a, **args ):
+            s._S = { n:(args[n] if n in args else v(s)) for n,v in params}
+            return f( s, *a )
+        return r
+    return decor
+
+def gen_func( *params, rt='void' ): # TODO: name prefix ? object, class, namespace ?
+    def decor( f ):
+        def r( s, **args ): # c / c++ selection ?
+            ln = s.wctx().ln
+            try:
+                c = getattr( s, '_fcfg_'+f.__name__ )
+            except AttributeError:
+                c = func() # blank func config
+                setattr( s, '_fcfg_'+f.__name__, c ) # TODO: fixing parameter function
+            fn = '{}_{}'.format( s.n, f.__name__ ) # TODO: put func in class ?
+            if args.get('decl',None): # TODO: ctx for ln
+                ln('{} {}({}){{', # TODO: attrs ?
+                    rt, fn,
+                    ','.join([
+                        '{} {}'.format(str(v.t),n) for n,v in params if v.isp()
+                    ])
+                )
+                s._S = { n:(args[n] if n in args else v(s)) for n,v in params}
+                rn = f( s )
+                if rt != 'void':
+                    ln('return {};', rn)
+                ln('}}')
+            else:
+                if not c.en:
+                    print('function {} is used but not enabled'.format(fn)) # FIXME: warn
+                for n,v in params:
+                    if n not in args:
+                        args[n] = v(s)
+                    else:
+                        if not v.isp(): # FIXME: what with undefined arguments ?
+                            args['inline'] = True
+                if args.get('inline',None) or getattr(c, 'inline', None):
+                    s._S = { n:(args[n] if n in args else v(s)) for n,v in params}
+                    rf = f( s ) # TODO: conversion ? return type ?
+                else:
+                    v = ','.join([ args.get(n, v) for n,v in params if v.isp() ]) # TODO: multiple func versions
+                    rf = '{}({})'.format(fn,v)
+                if rt != 'void' and args.get('rn', None):
+                    ln('{} {} = {};', rt,args['rn'],rf)
+                    return rn
+                else:
+                    ln('{};', rf)
+        return r
+    return decor
+
+
+
 link_func = {
         '.': lambda o: o,
         '..': lambda o: o._p,
         '...': lambda o: o.go_proc()
 }
-class link_path: # TODO: move to config_parent
+class link_path: # TODO: move to config_parent ?
     def _get( s, t ):
         try:
             for i in t:
@@ -261,20 +342,20 @@ class link_path: # TODO: move to config_parent
                 if i.startswith( '.' ):
                     try: # TODO: nop default ?
                         s = link_func[i]( s )
-                    except AttributeError:
+                    except AttributeError: # KeyError ?
                         raise NotImplementedError( 'no path command: \'%s\'' % str(i) )
                 else:
                     try:
                         s = getattr( s, i )
                     except AttributeError: # TODO: cut recursion, better error
-                        s = s._p.get( s._l )
+                        s = s._p.get( s._l ) # !!!!!!!!!!! get_dep
                         while True:
                             try:
                                 s = getattr( s, i )
                                 break
                             except AttributeError:
                                 if s._p is p: return s
-                                s = s._p.get( s._l )
+                                s = s._p.get( s._l ) # !!!!!!!!!!! get_dep
             return s
         except AttributeError:
             raise LookupError( 'no path \'%s\'' % l )
@@ -328,8 +409,8 @@ class config_descr:
         s.tt = [ input_descr( *i ) for i in tt ]
         s.ff = ff
 
-class input_descr: #( xml_storable ):
-    def __init__( s, n, vd, fv, sl, update=False, pdescr=None ):
+class input_descr:
+    def __init__( s, n, vd, fv, sl={}, update=False, pdescr=None ):
         s.n = n
         s.vd = vd
         s.fv = fv
@@ -381,7 +462,7 @@ def gen_combo( o, n, f, ucb=None ):
     cb.connect("changed", change_list_cb, o, n, ucb)
     return cb
 
-def gen_proc_view( t ):
+def gen_proc_view( t ): # to render
     tl = len( t )//4
     tt = Gtk.Table(tl+2, tl+2, False) # TODO: move to grid
     it=0
@@ -411,9 +492,8 @@ def gen_proc_view( t ):
     return tt
 
 class config_parent( link_path, xml_storable ):
-    #cp = copy.deepcopy TODO: other copy, ignore some attrs
 
-    ev_act = {
+    ev_act = { # type, button, state(func keys)
             (Gdk.EventType.BUTTON_PRESS, 3, 0) : lambda e, ev:e.menu().popup_at_pointer( ev )
     }
 
@@ -450,21 +530,17 @@ class config_parent( link_path, xml_storable ):
         except (AttributeError, KeyError):
             return getattr( s, n )
 
-#    def load_cfg( s, vn, n ):
-#        c = s.get_cfg( 'import_cfg' )( n )
-#        setattr( s, vn, c )
-#        c._p = s
-#        try:
-#            c.imported()
-#        except AttributeError:
-#            pass
-#        return c
+    @gen_func()
+    def gen_setup( s ):
+        for i in s.__dict__.values():
+            if hasattr(i, 'gen_setup') and getattr(i, 'en', None):
+                i.gen_setup()
 
     def imported( s ):
         for n,i in s.__dict__.items():
             if not n.startswith('_'):
                 try:
-                    i._p = s # !!!!!!!!! object with no imported method
+                    i._p = s
                     i.imported()
                 except AttributeError:
                     pass
@@ -522,36 +598,34 @@ class config_parent( link_path, xml_storable ):
         return r
 
     def wctx( s ):
-        return s.get_cfg( '_wctx' )
-
-    def start_clk( s ):
-        s.get_cfg( 'start_clk' )( s.n )
+        try:
+            return s._wctx
+        except AttributeError:
+            w = s._p.wctx()
+            s._wctx = w
+            return w
 
     def get_tooltip( s ):
         if not hasattr( s, 'descr_short' ): return s.n
         return s.descr_short()
 
-    def update_all( s ):
-        if hasattr( s, 'update' ): s.update()
-        if s.editing():
-            flush_children( s._pb )
-            pb = s._pb
-            s.show( pb )
+#    def close( s ):
+#        s.__dict__.pop( '_pb', None )
 
-    def close( s ):
-        s.__dict__.pop( '_pb', None )
+#    def editing( s ):
+#        return hasattr( s, '_pb' )
 
-    def editing( s ):
-        return hasattr( s, '_pb' )
-
-    def rollup( s ):
-        if hasattr( s, '_pb' ):
-            del s._pb
+#    def rollup( s ):
+#        if hasattr( s, '_pb' ):
+#            del s._pb
 
     def show_window( s ):
         w = Gtk.Window()
         w.set_title( getattr( s, 'name', s.n ) )
-        w.add( s.show() )
+        b = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        w.add( b )
+        b.add( s.render('fields') )
+        b.add( s.render('tiles') )
         w.show_all()
         return w
 
@@ -568,6 +642,16 @@ class config_parent( link_path, xml_storable ):
             if hasattr( i, 'remove' ) and not n.startswith( '_' ):
                 i.remove()
 
+    def cp( s ):
+        r = s.__class__()
+        for n, v in s.__dict__.items():
+            if not n.startswith('_'):
+                try:
+                    o = v.cp()
+                except AttributeError:
+                    o = v; # TODO: add cp to other objects
+            setattr( r, n, o )
+
     def default_name( s, o=None ):
         n = s.__class__.__name__
         if not o: return n
@@ -577,9 +661,12 @@ class config_parent( link_path, xml_storable ):
             i+=1
         return n+str(i)
 
+    def clk_start( s ):
+        s.get_cfg('cstart')( s.pname() )
+
     # returns loaded config
-    def load_cfg( s, cfg_name ):
-        return s.get_cfg( 'import_cfg' )( cfg_name )
+    def load_cfg( s, n ):
+        return s.get_cfg( 'import_cfg' )( n )
 
     def child_reconfig( s, c, n=None ):
         if isinstance( c, str ):
@@ -591,9 +678,16 @@ class config_parent( link_path, xml_storable ):
             if v.__class__ is c.__class__: # FIXME: must be strict comparison ?
                 c.reconfigure( c )
             else:
-                setattr( s, n, c ) # TODO: copy config ?
+                raise AttributeError # copy obj in except
         except AttributeError:
+            c = c.cp()
             setattr( s, n, c )
+            c.imported()
+            try:
+                c._p = s
+                c.imported()
+            except AttributeError:
+                pass
 
     def reconfigure( s, c ):
         for n,i in c.__dict__.items():
@@ -607,10 +701,6 @@ class config_parent( link_path, xml_storable ):
                 except AttributeError:
                     setattr( s, n, i )
         # FIXME: remove other params ?
-
-    def parent_set_cb( s, c, p ):
-        if not c.get_parent():
-            s.close()
 
     def expander_cb( s, e ):
         if not e.get_expanded():
@@ -667,36 +757,60 @@ class config_parent( link_path, xml_storable ):
         return [ i for i in s.__dict__.values()
                 if hasattr( i, 'iv_data' ) ]
 
+    def parent_set_cb( s, c, p, n ):
+        if not c.get_parent():
+            s.close( n )
+
+    def close( s, n ):
+        try:
+            del s._v[n]
+        except (AttributeError, KeyError):
+            pass
+
+    def update_all( s ):
+        try:
+            s.update()
+        except AttributeError:
+            pass
+        vd = s.__dict__.setdefault('_v', {})
+        for n, o in vd.items():
+            try:
+                pb = o['pb']
+                flush_children( pb )
+                getattr( s, 'render_'+n )( pb, *o['p'], **o['pv'] )
+                pb.show_all();
+            except (KeyError, AttributeError):
+                pass
+
+    def create_box( s, opt ): # TODO: options
+        if opt.get('type', None) == 'scroll':
+            b = Gtk.ScrolledWindow()
+        else:
+            b = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        return b
+
     def render( s, vn, *p, **pv ):
         try:
-            vd = s._v
+            vd = s.__dict__.setdefault('_v', {})
             try:
-                getattr( s, 'hide_'+vn )( vd[vn] )
+                o = vd[vn]
                 del vd[vn]
+                getattr( s, 'hide_'+vn )( o['pb'], *o['p'], **o['pv'] )
             except (KeyError, AttributeError):
                 pass
             #pb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL) TODO: scrolled window with box ?
             #pb.connect( 'parent-set', s.parent_set_cb )
-            r = getattr( s, 'render_'+vn )( *p, **pv )
+            r = s.create_box(pv.get('box_opt', {}))
+            r.connect( 'parent-set', s.parent_set_cb, vn )
+            getattr( s, 'render_'+vn )( r, *p, **pv )
             r.show_all();
-            vd[vn] = r
+            vd[vn] = {'pb':r, 'p':p, 'pv':pv}
             return r
         except KeyError:
             print('No render {} for {} object'.format(vn,s.__class__.__name__))
             return None
 
     def render_tree( s, pb=None, sel_cb=None, act_cb=None ):
-        s.rollup()
-        if not pb:
-            pb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            pb.connect( 'parent-set', s.parent_set_cb )
-        s._pb = pb
-
-        sw = Gtk.ScrolledWindow()
-        #sw.set_policy(Gtk.POLICY_AUTOMATIC, Gtk.POLICY_AUTOMATIC)
-        #pb.add(sw)
-        pb = sw
-
         ts = Gtk.TreeStore(object, str)
         s.trow( ts, None )
 
@@ -714,23 +828,18 @@ class config_parent( link_path, xml_storable ):
         tv.connect( 'button-press-event', view_btn_cb )
         if sel_cb: tv.connect( 'cursor-changed', treeview_sel_cb, sel_cb )
         if act_cb: tv.connect( 'row-activated', treeview_act_cb, act_cb )
-        sw.add(tv)
-        return pb
+        pb.add(tv)
 
     def render_fields( s, pb=None, show_tiles=False ): # TODO: some renderers
-        s.rollup()
-        if not pb:
-            pb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            pb.connect( 'parent-set', s.parent_set_cb )
-        s._pb = pb
         cd = s.descr
         ucb = s.update_all
+        o = s.__dict__
         for i in cd.tt:
             n = i.n
             u = not i.sl
             for a,v in i.sl.items():
-                if hasattr(s,a):
-                    a = getattr(s,a)
+                if a in o:
+                    a = o[a]
                     if isinstance( v, tuple ):
                         if a in v: u = True
                     elif a == v: u = True
@@ -744,55 +853,58 @@ class config_parent( link_path, xml_storable ):
                 elif isinstance( f, str ):
                     pass
                 else:
-                    d = getattr( s, n, None )
-                    if not d:
+                    d = o.get( n, None )
+                    if d is None:
                         d = f.obj()
                         d._p = s
-                        setattr( s, n, d )
+                        o[n] = d
                     l = f.disp( d, ucb )
                     for c in l: b.add( c )
-            elif hasattr( s, n ): delattr( s, n )
+            elif n in o: del o[n]
+        pb.show_all()
+
+    def render_tiles( s, pb=None ):
         if not hasattr( s, 'child_order' ): # TODO: support links here ?
             s.child_order = s.find_child_order() # xml_list( [ n for n,i in d if isinstance( i, config_parent ) ] )
         d = s.__dict__
-        if s.hasopt('tiles') and show_tiles:
-            il = Gtk.ListStore( object, str, Pixbuf )
-            iv = Gtk.IconView()
-            iv.set_model( il )
-            iv.set_pixbuf_column( 2 )
-            iv.set_text_column( 1 )
-            for n in s.child_order:
-                i = d[n]
-                pixbuf = Gtk.IconTheme.get_default().load_icon(i.get_icon(), 64, 0) # TODO: icon from class
-                pp = il.get_path( il.append([i, i.n, pixbuf]) )
-            iv.set_property( 'has-tooltip', True )
-            iv.connect( 'query-tooltip', iconview_tp_cb ) # TODO: method from class
-            iv.connect( 'item-activated', iconview_ac_cb )
-            iv.connect( 'drag-data-get', s.iv_drag_get )
-            iv.connect( 'button-press-event', view_btn_cb )
-            targets = Gtk.TargetList.new([])
-            targets.add_image_targets(1, True)
-            iv.enable_model_drag_source( Gdk.ModifierType.BUTTON1_MASK, [], Gdk.DragAction.MOVE )
-            iv.drag_source_set_target_list( targets )
-            if s.hasopt('tiles_edit'):
-                iv.enable_model_drag_dest( [], Gdk.DragAction.MOVE )
-                iv.drag_dest_set_target_list( targets )
-                iv.connect('drag-data-received', s.iv_drag_recv )
-                iv.connect('drag-data-delete', lambda *x: (print('delete',*x) or True) )
-            pb.add( iv )
-        else:
-            for n in s.child_order:
-                i = d[n]
-                e = Gtk.Expander( label=getattr( i, 'name', i.n ) )
-                e.connect( 'activate', i.expander_cb )
-                pb.add( e )
-        pb.show_all()
-        return pb
+
+        il = Gtk.ListStore( object, str, Pixbuf )
+        iv = Gtk.IconView()
+        iv.set_model( il )
+        iv.set_pixbuf_column( 2 )
+        iv.set_text_column( 1 )
+        for n in s.child_order:
+            i = d[n]
+            pixbuf = Gtk.IconTheme.get_default().load_icon(i.get_icon(), 64, 0) # TODO: icon from class
+            pp = il.get_path( il.append([i, i.n, pixbuf]) )
+        iv.set_property( 'has-tooltip', True )
+        iv.connect( 'query-tooltip', iconview_tp_cb ) # TODO: method from class
+        iv.connect( 'item-activated', iconview_ac_cb )
+        iv.connect( 'drag-data-get', s.iv_drag_get )
+        iv.connect( 'button-press-event', view_btn_cb )
+        targets = Gtk.TargetList.new([])
+        targets.add_image_targets(1, True)
+        iv.enable_model_drag_source( Gdk.ModifierType.BUTTON1_MASK, [], Gdk.DragAction.MOVE )
+        iv.drag_source_set_target_list( targets )
+        if s.hasopt('tiles_edit'):
+            iv.enable_model_drag_dest( [], Gdk.DragAction.MOVE )
+            iv.drag_dest_set_target_list( targets )
+            iv.connect('drag-data-received', s.iv_drag_recv )
+            iv.connect('drag-data-delete', lambda *x: (print('delete',*x) or True) )
+        pb.add( iv )
+
+    def render_elist( s, pb=None ):
+        if not hasattr( s, 'child_order' ): # TODO: support links here ?
+            s.child_order = s.find_child_order()
+        for n in s.child_order:
+            i = d[n]
+            e = Gtk.Expander( label=getattr( i, 'name', i.n ) )
+            e.connect( 'activate', i.expander_cb )
+            pb.add( e )
 
     def trow( s, t, p ):
-        tn = t.append( p, [ s, s.n ] ) # TODO: icon
+        tn = t.append( p, [ s, s.n ] ) # TODO: icon, update row ?
         s.tload_def( t, tn )
-        #s._tn = tn
 
     def tload_def( s, t, tn ):
         t.append( tn, [ None, 'Loading...' ] ) # TODO: remember expanded
@@ -813,6 +925,12 @@ class config_parent( link_path, xml_storable ):
 class link( xml_storable ):
     def __init__( s ):
         s._l = '.'
+    def cp( s ):
+        r = super().cp()
+        if hasattr( s, '_l' ):
+            r._l = s._l
+        if hasattr( s, '_cfg' ):
+            r._cfg = s._cfg
     def gen_setup( s ):
         o = s._p.get( s.l )
         try:
@@ -822,7 +940,7 @@ class link( xml_storable ):
     def imported( s ):
         try:
             c = s._p.load_cfg( s._cfg )
-            s._p.link_reconfigure( l, c )
+            s._p.link_reconfigure( s._l, c ) # TODO: what if exists ?
         except AttributeError:
             pass
     def reconfigure( s, c ): # TODO: configure action/rules
@@ -874,14 +992,14 @@ class freq_setup:
         r.append( Gtk.Label( '= '+cnv_num( fo.freq )+'Hz' ) )
         return r
 
-class xml_list( list ):
-    def xml_store( s, e ):
-        a.attrib['l'] = '#'.join( s )
-    def xml_load( s, e, cm ):
-        s[:] = []
-        l = e.attrib.get( 'l', None )
-        if l:
-            s.extend( l.split('#') )
+#class xml_list( list ): # is it used ?
+#    def xml_store( s, e ):
+#        a.attrib['l'] = '#'.join( s )
+#    def xml_load( s, e, cm ):
+#        s[:] = []
+#        l = e.attrib.get( 'l', None )
+#        if l:
+#            s.extend( l.split('#') )
 
 class func( xml_storable ):
     def __init__( s ):
@@ -902,9 +1020,12 @@ class func_setup:
         r = [ b_en ]
         if fo.en:
             b_en.set_active( True )
-            bt = Gtk.CheckButton( 'volatile' )
-            bt.connect('clicked', fo.update_cb, 'volatile')
-            r.append( bt )
+            bv = Gtk.CheckButton( 'volatile' )
+            bv.connect('clicked', fo.update_cb, 'volatile')
+            r.append( bv )
+            bi = Gtk.CheckButton( 'inline' )
+            bi.connect('clicked', fo.update_cb, 'inline')
+            r.append( bi )
         b_en.connect('clicked', fo.update_cb, 'en', fo._p.update_all)
         return r
 
@@ -919,7 +1040,7 @@ class objsel_setup:
         o.link_reconfigure( fo._l, s.cfgn )
         o.update_all()
     def disp( s, fo, cb ):
-        b =  Gtk.Box( orientation=Gtk.Orientation.HORIZONTAL )
+        b = Gtk.Box( orientation=Gtk.Orientation.HORIZONTAL )
         r = [ b ]
         sel_o = fo._p.get( s.l )
         l = []

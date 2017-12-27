@@ -139,7 +139,7 @@ class struct_descr( xml_storable ):
             for i in s.t:
                 if hasattr( i, 't' ):
                     if isinstance( i.t, str ):
-                        i.t = p.get_periph( i.t )
+                        i.t = p.get_type( i.t )
                     i.l = i.t.l
         s.l = 0
         for i in s.t:
@@ -155,16 +155,17 @@ class struct_descr( xml_storable ):
 
 class periph_obj( xml_storable ):
     def gen_setup( s, out, fn, fl, mode ): # TODO: faster version in C++
+        ln = out.ln
         f = s.t._t[ fn ]
-        out.putl('   /* {}: {}  */'.format(f.get_descr(),fl))
-        zu = mode.zu # zero used
-        zz = mode.zz # zero all
+        ln('   /* {}: {}  */'.format(f.get_descr(),fl))
+        zu = mode.zu
+        zz = mode.zz
         if zz: zu=False
         vv = [0]*f.ne
         nbits = f.l*8
-        just_ones = (1<<nbits)-1
+        ones = (1<<nbits)-1
         if zu:
-            uu = [just_ones]*f.ne
+            uu = [ones]*f.ne
         for n,v in fl.items():
             ff = f.b[ n ]
             nn = ff.b//nbits
@@ -184,11 +185,11 @@ class periph_obj( xml_storable ):
             if zu and uu[it]!=just_ones:
                 av = '0x%0*x' % (nbits//4,uu[it])
             if av and nv:
-                out.putl('{0}=((({0})&{1})|{2});'.format(fp, av, nv))
+                ln('{0}=((({0})&{1})|{2});'.format(fp, av, nv))
             elif nv:
-                out.putl(fp+pp+nv+';')
+                ln(fp+pp+nv+';')
             elif av:
-                out.putl('{}&={};'.format(fp, av)) # TODO: negate flag
+                ln('{}&={};'.format(fp, av)) # TODO: negate flag
     def __init__( s ):
         a=0
     def xml_store( s, e ):
@@ -208,14 +209,19 @@ class proc_cfg( xml_storable):
         s.vars = {}
     def import_cfg( s, n ):
         try:
-            r = s.load_obj( '{}/{}.xml'.format( s._cfg_dir, n ), s._cm )
+            r = load_file( '{}/{}.xml'.format( s._cfg_dir, n ), s._cm )
             r.cfg_name = n;
             return r
-        except KeyError:
+        except (KeyError, FileNotFoundError):
             return s._pcfg.import_cfg( n )
-    def get_periph( s, n ): # TODO: cache
+    def get_type( s, n ): # TODO: cache
         try:
             return s.types[ n ]
+        except KeyError:
+            return s._pcfg.get_type( n )
+    def get_periph( s, n ): # TODO: cache
+        try:
+            return s.periph_data[ n ]
         except KeyError:
             return s._pcfg.get_periph( n )
     def get_var( s, n ): # TODO: cache
@@ -229,7 +235,7 @@ class proc_cfg( xml_storable):
             i.n = n
             i.update_load( s )
         for n,i in s.periph_data.items():
-            s.periph_data[n].t = s.get_periph( i.t )
+            s.periph_data[n].t = s.get_type( i.t )
         return s
 
 def load_proc_cfg( cm=None, cfg_dir=None, f=None, pcfg=None ):

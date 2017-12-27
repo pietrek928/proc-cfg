@@ -6,35 +6,46 @@ import gui
 w = gui.Gtk.Window( title='aaaaaaaa' )
 pc = stm.processor()
 
-p2 = stm.gpio_pin()
-p2.test_freq2 = 8e6
+#p2 = stm.gpio_pin()
+#p2.test_freq2 = 8e6
 p = stm.gpio_pin()
-p.n='p1'
-p2.n='p2'
+p.n='p5'
+p.num = 5
+#p2.n='p2'
 p.test_freq2 = 8e6
-p.p=p
-p.p2=p2
+p.en = True
+#p.p=p
+#p.p2=p2
 p.tiles = True
-p.child_order = [ 'p', 'p2' ]
+p.child_order = [  ]
 p.tiles_edit = True
-p2.p3=p
-p2.tiles = True
-p2.tiles_edit = True
-p.n='p1'; p2.n='p2'
+#p2.p3=p
+#p2.tiles = True
+#p2.tiles_edit = True
+#p.n='p1'; #p2.n='p2'
 
 gp = stm.gpio()
+gp.en = True
 gp.n = 'A'
+gp.id = 'A'
 gp.p = p
 
+pc.n = 'procek_xd'
 pc.gp = gp
-pc.gen_setup()
+pc.fix_parent()
 
-w.add( p.show(show_tiles=True) )#"""
-#w.add(p.render_tree(sel_cb=print))
+#w = p.show_window() #"""
+#w.connect("destroy",gui.Gtk.main_quit)
+#w.show_all()
+
+gp.child_order = ['p']
+w = gp.show_window() #"""
 w.connect("destroy",gui.Gtk.main_quit)
 w.show_all()
 
 gui.Gtk.main()
+
+pc.gen_setup(decl=True)
 
 """
 e = gui.Et.Element("root")

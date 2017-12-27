@@ -16,134 +16,45 @@ CD = config_descr
 FS = func_setup
 #freq_descr = gui.freq_descr
 
-# TODO: single function
-processor_name = __name__
-processor_cfg = load_proc_cfg( cm=modules[__name__], cfg_dir='periph_config/'+__name__, f='periph_config/{}.xml'.format(processor_name), pcfg=processor_cfg )
-
-class processor( processor ): # TODO: processor parent class
-    _proc_cfg = processor_cfg
+parent_cfg = processor.proc_cfg
+class processor( processor ):
+    model = __name__ # TODO: single function
+    proc_cfg = load_proc_cfg( cm=modules[__name__], cfg_dir='periph_config/'+model, f='periph_config/{}.xml'.format(model), pcfg=parent_cfg )
+    get_periph = proc_cfg.get_periph
     def write_start( s ):
         s.clks = []
         s.psets = {}
-    def clk_start( s, n ):
-        s.clks.append( n )
     def get_mode( s, n ):
         return mode_obj()
     def gen_code( s, wctx, f, *args, **vargs ):
         pass
-    def gen_setup( s ):
-        for n,i in s.__dict__.items():
-            if hasattr( i, 'gen_setup' ) and not n.startswith( '_' ):
-                i.gen_setup()
-    def __init__( s):#, n ):
+    def __init__( s ):
         s.clr()
-        #s.ol = G__get_ol( n )
         s.descr_t = {}
         s.modes = {}
     def clr( s ):
         s.periph_data = {}
         s.types = {}
         s.vars = {}
+    def cstart( s, n ):
+        s.wctx().gen_setup(s.get_periph('RCC'), 'ENR', {n+'EN':1}, write_mode())
 #    def wctx( s, p ): # TODO: cache ?
 #        pd = s.get_obj( p )
 #        return write_ctx( s.get_periph( pd.pname() ), s )
     # get periph regs ?
 
-class param_t:
-    def __init__( s, dv=None, p=False ):
-        if p:
-            s.p = p
-        if dv is not None:
-            s.dv = dv
-    def __call__( s, o ):
-        v = getattr( s, 'dv', None )
-        try:
-            return ( # TODO: type, link ?
-                    getattr( o, v[1:], None ) if v.startswith('$') else v
-                )
-        except AttributeError:
-            return v
-    # def isp( s ):
-        return getattr( s, 'p', None )
-
-ln = lambda *a: print(*a)
-
-# TODO: wctx, force inline
-def gen_func( *params, rt='void' ): # TODO: name prefix ? object, class, namespace ?
-    def decor( f ):
-        def r( s, **args ): # c / c++ selection ?
-            try:
-                c = getattr( s, '_fcfg_'+f.__name__ )
-            except AttributeError:
-                c = None; # blank func config
-                setattr( s, '_fcfg_'+f.__name__, c ) # TODO: fixing parameter function
-            fn = '{}_{}'.format( s.n, f.__name__ ) # TODO: put func in class ?
-            if args.get('decl',None): # TODO: ctx for ln
-                ln('{} {}({}){{'.format( # TODO: attrs ?
-                    rt, fn,
-                    ','.join([
-                        '{} {}'.format(str(v.t),n) for n,v in params
-                    ])
-                ))
-                s._S = { n:(args[n] if n in args else v(s)) for n,v in params}
-                rn = f(s)
-                if rt != 'void':
-                    ln('return {};'.format(rn))
-                ln('}')
-            else:
-                if not c.en:
-                    warn('function {} is used but not enabled'.format(fn))
-                for n,v in params:
-                    if n not in args:
-                        args[n] = v(s)
-                    else:
-                        if not v.isp(): # FIXME: what with undefined arguments ?
-                            args['inline'] = True
-                if args.get('inline',None):
-                    s._S = args
-                    return f( s, **args ) # TODO: conversion ? return type ?
-                v = ','.join([ args[n] for n,v in params if v.isp() ]) # TODO: multiple func versions
-                if vr != 'void' and args.get('rn', None):
-                    ln('{}({});'.format(fn,v))
-                else:
-                    rn = args['rn']
-                    ln('{} {} = {}({});'.format(rt.t,rn.n,s.n,v))
-                    return rn
-        return r
-    return decor
-
-P = param_t
-
 class gpio( config_parent ):
-    @gen_func(
-            ('mode', P('in')),
-            ('out_mode', P(0)),
-            ('in_mode', P('floating')),
-            ('out_mode', P(0)), # TODO: enum class ?
-    )
+    @gen_func()
     def gen_setup( s ): # TODO: parametrized setup ?
         cr = {}
         bsrr = {}
-        for e in s.children:
-            nn = str(e.num)
-            m = e.get_arg( 'mode' ) # TODO: unify names ?
-            if m in ( 'out', 'afio' ):
-                cr['MODE'+nn] = e.get_arg( 'spd', 2 )
-                cr['CNF'+nn] =  ( 0 if m=='in' else 2 )+e.get_arg( 'out_mode', 0 )
-                if hasattr( e, 'v' ): bsrr[( 'BR' if e.v==0 else 'BS' )+nn] = 1
-                if m == 'afio': cr['CNF'+nn] |= 0x02
-            elif m == 'in':
-                cr['MODE'+nn] = 0
-                im = e.get_arg( 'in_mode', 'floating' )
-                if im == 'analog': cr['CNF'+n] = 0
-                elif im == 'floating': cr['CNF'+n] = 1
-                else:
-                    cr['CNF'+nn] = 2
-                    bsrr[( 'BR' if im=='down' else 'BS' )+nn] = 1
-        ctx = s.wctx()
-        ctx.clk_start()
-        ctx.wset( 'CRL' , cr )
-        ctx.wset( 'BSRR', bsrr )
+        for e in s.child_order:
+            e = getattr( s, e )
+            e.setup_regs( cr, bsrr )
+        s.clk_start()
+        s.wctx().cperiph(s.pname(),
+                    CR=cr,
+                    BSRR=bsrr )
 
     def pname( s ):
         return 'GPIO'+s.id
@@ -153,6 +64,7 @@ class gpio( config_parent ):
     descr = CD(
         'GPIO port setup',
         [
+            ( '_fcfg_gen_setup', 'Generate setup', FS() ),
         ],
     )
 
@@ -174,14 +86,40 @@ class gpio_pin( config_parent ):
     def descr_pname( s ):
         return s._p.descr_pname()+str(s.num)
 
+    @setup_params(
+        ('m', P('in')),
+        ('spd', P(2)),
+        ('in_mode', P('floating')),
+        ('out_mode', P(0)), # TODO: enum class ?
+        ('v', P(0))
+    )
+    def setup_regs( s, cr, bsrr ):
+        P = s.get_arg
+        nn = str(s.num)
+        m = P( 'm' )
+        if m in ( 'out', 'afio' ):
+            cr['MODE'+nn] = P( 'spd' )
+            cr['CNF'+nn] = 2 + P( 'out_mode' )
+            bsrr[( 'BR' if P('v')==0 else 'BS' )+nn] = 1
+            if m == 'afio': cr['CNF'+nn] |= 0x02
+        elif m == 'in':
+            cr['MODE'+nn] = 0
+            im = P( 'in_mode' )
+            if im == 'analog': cr['CNF'+nn] = 0
+            elif im == 'floating': cr['CNF'+nn] = 1
+            else:
+                cr['CNF'+nn] = 2
+                bsrr[( 'BR' if im=='down' else 'BS' )+nn] = 1
+
     descr = CD(
         'GPIO pin setup',
         [
-            ( 'mode', 'Mode', ('out','in','afio'), {}, True ),
+            ( 'm', 'Mode', ('out','in','afio'), {}, True ),
             ( 'afion', 'Afio number', (0,4), { 'm':'afio' } ),
             ( 'out_mode', 'Output mode', (('push-pull',0),('open-drain',1)), { 'm':('afio','out') } ),
             ( 'spd', 'Output speed', ( ('2MHz',2), ('10MHz',1), ('50MHz',3) ), { 'm':('afio','out') } ),
             ( 'in_mode', 'Input mode', ('up','down','analog','floating'), { 'm':('in') } ),
+            ( '_fcfg_gen_setup', 'Genrate setup', FS() ),
             ( '_fcfg_val', 'Get value', FS(), { 'm':('afio','in') } ),
             ( '_fcfg_vset', 'Set high', FS(), { 'm':('afio','out') } ),
             ( '_fcfg_vreset', 'Set low', FS(), { 'm':('afio','out') } ),

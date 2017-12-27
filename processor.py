@@ -3,61 +3,103 @@
 from sys import modules
 
 from gui import *
+from copy import copy
 from periph_class import proc_cfg
 
-#G__ol = xml_storable.load_obj
-
-processor_cfg = None
+P = param_t
 
 class processor( config_parent ):
+    proc_cfg = None
     def write_start( s ):
         s.clks = []
         s.psets = {}
-    def clk_start( s, n ):
-        s.clks.append( n )
+        s._wctx = write_ctx(s.proc_cfg, )
     def get_mode( s, n ):
         return mode_obj()
-    def gen_code( s, wctx, f, *args, **vargs ):
-        pass
-    def gen_setup( s ):
-        for n,i in s.__dict__.items():
-            if hasattr( i, 'gen_setup' ) and not s.startswith( '_' ):
-                i.gen_setup()
-    def __init__( s, n ):
+    def __init__( s ):
         s.clr()
-        s.ol = G__get_ol( n )
         s.descr_t = {}
         s.modes = {}
-    def wctx( s, p ): # TODO: cache
-        pd = s.get_obj( p )
-        return write_ctx( s.get_periph( pd.pname() ), s )
+        s._imp_ch = {}
+    def wctx( s ):
+        return write_ctx( s.get_periph, s )
     def import_cfg( s, n ): # TODO: cache
-        s._proc_cfg.import_cfg( n )
-    def gen_code( s ):
-        super().gen_code()
+        try:
+            return s._imp_ch[n]
+        except KeyError:
+            r = s.proc_cfg.import_cfg( n )
+            s._imp_ch[n] = r
+            return r
+    #def gen_code( s ):
+    #    # TODO: include ? startup ?
+    #    super().gen_code()
 
 class write_ctx:
-    def __init__( s, p, cfg, dmode='ww' ):
-        s.dmode = dmode
-        s.c = cfg;
-        s.p = p
-        s.o = s.c.o
-    def wset( s, n, v, m=None ):
-        if not m: m = s.dmode
-        s.p.gen_setup( s.o, n, v, s.c.get_mode(m) )
-    def clk_start( s ):
-        s.c.clk_start( s.p.n )
+    def gen_setup( s, p, fn, fl, mode ): # TODO: faster version in C++
+        ln = s.ln
+        print(p.t._t)
+        f = p.t._t[ fn ]
+        ln('   /* {}: {}  */', f.get_descr(),fl)
+        zu = mode.zu
+        zz = mode.zz
+        if zz: zu=False
+        vv = [0]*f.ne
+        nbits = f.l*8
+        ones = (1<<nbits)-1
+        if zu:
+            uu = [ones]*f.ne
+        for n,v in fl.items():
+            ff = f.b[ n ]
+            nn = ff.b//nbits
+            ss = ff.b %nbits
+            vv[nn] |= int(v)<<ss # TODO: unconstant value, cut bits option
+            if zu and not mode.ww:
+                uu[nn] &= ~(((1<<(1 if not hasattr(ff,'e') else ((ff.e%nbits)-ss+1)))-1)<<ss);
+        print(p.__dict__)
+        fpos = p.a+f.off;
+        pp =( '=' if zz or mode.ww else '|=' ) # preserve previous
+        vol = ( 'volatile ' if mode.vol else '' )
+        for it in range(len(vv)): # TODO: preserve current vals
+            fp = '( *({}uint{}_t*){})'.format(vol, f.l*8, hex(fpos+it*f.l))
+            nv = None
+            av = None
+            if zz or vv[it]!=0:
+                nv = '0x%0*x' % (nbits//4,vv[it])
+            if zu and uu[it]!=ones:
+                av = '0x%0*x' % (nbits//4,uu[it])
+            if av and nv:
+                ln('{0}=((({0})&({1}))|({2}));', fp, av, nv)
+            elif nv:
+                ln(fp+pp+nv+';')
+            elif av:
+                ln('({})&=({});', p, av) # TODO: negate flag
+    def __init__( s, g, m=None ):
+        s.m = m if m else write_mode
+        s.g = g
+    def cperiph( s, n, **v ):
+        p = s.g( n )
+        for n,v in v.items():
+            s.gen_setup( p, n, v, s.m )
+#    def wset( s, n, v, m=None ):
+#        if not m: m = s.dmode
+#        s.gen_setup( s.o, n, v, s.c.get_mode(m) )
+    def ln( s, t, *a, **aa ):
+        print( t.format(*a, **aa) )
 
 class pcfg( config_parent ):
     def __init__( s ):
         pass
-class out_proc:
-    def putl( s, v ): print(v)
 
-class mode_obj:
-    zz = False
-    vol = False
-    zu = True
-    ww = False
+class write_mode:
+    zz = False # zero all
+    vol = False # volatile
+    zu = True # zero used
+    ww = False # write only - unset fields to zeros
+
+    def set(s, **o):
+        r = copy(s)
+        r.__dict__.update(o)
+        return r
+
 
 
