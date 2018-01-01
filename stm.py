@@ -11,7 +11,6 @@ from periph_class import load_proc_cfg
 # - rest of the setup
 # - gen other functions
 
-ID = input_descr
 CD = config_descr
 FS = func_setup
 #freq_descr = gui.freq_descr
@@ -51,6 +50,7 @@ class gpio( config_parent ):
         for e in s.child_order:
             e = getattr( s, e )
             e.setup_regs( cr, bsrr )
+        print(cr, bsrr)
         s.clk_start()
         s.wctx().cperiph(s.pname(),
                     CR=cr,
@@ -58,6 +58,8 @@ class gpio( config_parent ):
 
     def pname( s ):
         return 'GPIO'+s.id
+    def clk_name( s ):
+        return 'IOP'+s.id
     def descr_pname( s ):
         return 'P'+s.id
 
@@ -87,11 +89,11 @@ class gpio_pin( config_parent ):
         return s._p.descr_pname()+str(s.num)
 
     @setup_params(
-        ('m', P('in')),
-        ('spd', P(2)),
-        ('in_mode', P('floating')),
-        ('out_mode', P(0)), # TODO: enum class ?
-        ('v', P(0))
+        ('m', 'in'),
+        ('spd', 2),
+        ('in_mode', 'floating'),
+        ('out_mode', 0), # TODO: enum class ?
+        ('v', 0)
     )
     def setup_regs( s, cr, bsrr ):
         P = s.get_arg
@@ -114,7 +116,7 @@ class gpio_pin( config_parent ):
     descr = CD(
         'GPIO pin setup',
         [
-            ( 'm', 'Mode', ('out','in','afio'), {}, True ),
+            ( 'm', 'Mode', ('out','in','afio'), {}, {'update':True} ),
             ( 'afion', 'Afio number', (0,4), { 'm':'afio' } ),
             ( 'out_mode', 'Output mode', (('push-pull',0),('open-drain',1)), { 'm':('afio','out') } ),
             ( 'spd', 'Output speed', ( ('2MHz',2), ('10MHz',1), ('50MHz',3) ), { 'm':('afio','out') } ),

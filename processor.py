@@ -22,7 +22,7 @@ class processor( config_parent ):
         s.modes = {}
         s._imp_ch = {}
     def wctx( s ):
-        return write_ctx( s.get_periph, s )
+        return write_ctx( s.get_periph )
     def import_cfg( s, n ): # TODO: cache
         try:
             return s._imp_ch[n]
@@ -30,6 +30,13 @@ class processor( config_parent ):
             r = s.proc_cfg.import_cfg( n )
             s._imp_ch[n] = r
             return r
+    def get_reg_doc( s, tn, fn=None, bn=None ):
+        t = s.proc_cfg.get_type( tn )
+        if not fn: return t.doc
+        f = t._t[fn]
+        if not bn: return f.doc
+        b = f.b[bn]
+        return b.doc
     #def gen_code( s ):
     #    # TODO: include ? startup ?
     #    super().gen_code()
@@ -37,17 +44,17 @@ class processor( config_parent ):
 class write_ctx:
     def gen_setup( s, p, fn, fl, mode ): # TODO: faster version in C++
         ln = s.ln
-        print(p.t._t)
         f = p.t._t[ fn ]
         ln('   /* {}: {}  */', f.get_descr(),fl)
         zu = mode.zu
         zz = mode.zz
         if zz: zu=False
-        vv = [0]*f.ne
+        ne = getattr( f, 'ne', 1 )
+        vv = [0]*ne
         nbits = f.l*8
         ones = (1<<nbits)-1
         if zu:
-            uu = [ones]*f.ne
+            uu = [ones]*ne
         for n,v in fl.items():
             ff = f.b[ n ]
             nn = ff.b//nbits
@@ -55,7 +62,6 @@ class write_ctx:
             vv[nn] |= int(v)<<ss # TODO: unconstant value, cut bits option
             if zu and not mode.ww:
                 uu[nn] &= ~(((1<<(1 if not hasattr(ff,'e') else ((ff.e%nbits)-ss+1)))-1)<<ss);
-        print(p.__dict__)
         fpos = p.a+f.off;
         pp =( '=' if zz or mode.ww else '|=' ) # preserve previous
         vol = ( 'volatile ' if mode.vol else '' )
@@ -74,7 +80,7 @@ class write_ctx:
             elif av:
                 ln('({})&=({});', p, av) # TODO: negate flag
     def __init__( s, g, m=None ):
-        s.m = m if m else write_mode
+        s.m = m if m else write_mode()
         s.g = g
     def cperiph( s, n, **v ):
         p = s.g( n )

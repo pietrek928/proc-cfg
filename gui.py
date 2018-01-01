@@ -189,8 +189,7 @@ def view_btn_cb( tv, ev ):
         p = tv.get_path_at_pos( ev.x, ev.y )[0]
         m = tv.get_model()
         e = m.get_value( m.get_iter( p ), 0 )
-        print(ev.type, ev.button, ev.state)
-        e.ev_act[(ev.type, ev.button, ev.state)] ( e, ev ) # TODO: different action depending on widget
+        e.call_act( e )  # TODO: different action depending on widget
         return True
     except (KeyError, AttributeError, TypeError) as e:
         #print(e) #TODO: error logger
@@ -207,32 +206,57 @@ def cnv_num( n ):
     else: nn='{:.4f}'.format(n)
     return nn+k
 
-class param_t:
-    def __init__( s, dv=None, p=False ):
-        if p:
-            s.p = p
-        if dv is not None:
-            s.dv = dv
-    def __call__( s, o ):
-        v = getattr( s, 'dv', None )
+
+def pproc( o, d, n, v=None, opt={} ):
+    try:
+        return (n, d[n])
+    except KeyError: # TODO: name of param inside function
         try:
-            return ( # TODO: type, link ?
+            return (n, getattr(o, n))
+        except AttributeError:
+            try:
+                return (n, # TODO: type, link ?
                     getattr( o, v[1:], None ) if v.startswith('$') else v
                 )
-        except AttributeError:
-            return v
-    def isp( s ):
-        return getattr( s, 'p', None )
+            except AttributeError:
+                return (n, v)
+
+class param_set:
+    def __init__( s, *p ):
+        s.p = p
+    def gen_list( s, o, d ):
+        return dict( pproc(o, args, *p) for p in s.p)
+    def gen_list_p( s, o, d ):
+        return dict( pproc(o, args, *p) if else (n, n) for p in s.p)
+    def decl( s ):
+        l = []
+        for i in
+        return ','.join([ '{} {}'.format(t, n) for n, v in s.p if  ])
+    def inargs( s, o, d ):
+        l = []
+        for i in s.p:
+            n = i[0]
+            if len(i) >= 4 and i[4].get('p', None):
+                l.append(
+                    args[n] if n not in args else pproc(*i)[1]
+                )
+            else:
+                if n in args and args[n] != pproc(*i)[1]:
+                    args['inline'] = True
+                    return None
+        return ','.join(l)
 
 def setup_params( *params ):
+    ps = param_set( *params )
     def decor( f ):
         def r( s, *a, **args ):
-            s._S = { n:(args[n] if n in args else v(s)) for n,v in params}
+            s._S = ps.gen_list( s, args )
             return f( s, *a )
         return r
     return decor
 
 def gen_func( *params, rt='void' ): # TODO: name prefix ? object, class, namespace ?
+    ps = param_set( *params )
     def decor( f ):
         def r( s, **args ): # c / c++ selection ?
             ln = s.wctx().ln
@@ -243,13 +267,10 @@ def gen_func( *params, rt='void' ): # TODO: name prefix ? object, class, namespa
                 setattr( s, '_fcfg_'+f.__name__, c ) # TODO: fixing parameter function
             fn = '{}_{}'.format( s.n, f.__name__ ) # TODO: put func in class ?
             if args.get('decl',None): # TODO: ctx for ln
-                ln('{} {}({}){{', # TODO: attrs ?
-                    rt, fn,
-                    ','.join([
-                        '{} {}'.format(str(v.t),n) for n,v in params if v.isp()
-                    ])
+                ln('{} {}({}) {{', # TODO: attrs ?
+                    rt, fn, ps.decl()
                 )
-                s._S = { n:(args[n] if n in args else v(s)) for n,v in params}
+                s._S = ps.gen_list_p( s, args )
                 rn = f( s )
                 if rt != 'void':
                     ln('return {};', rn)
@@ -257,23 +278,22 @@ def gen_func( *params, rt='void' ): # TODO: name prefix ? object, class, namespa
             else:
                 if not c.en:
                     print('function {} is used but not enabled'.format(fn)) # FIXME: warn
-                for n,v in params:
-                    if n not in args:
-                        args[n] = v(s)
-                    else:
-                        if not v.isp(): # FIXME: what with undefined arguments ?
-                            args['inline'] = True
                 if args.get('inline',None) or getattr(c, 'inline', None):
-                    s._S = { n:(args[n] if n in args else v(s)) for n,v in params}
+                    s._S = ps.gen_list( s, args ) # TODO: local vars
                     rf = f( s ) # TODO: conversion ? return type ?
                 else:
-                    v = ','.join([ args.get(n, v) for n,v in params if v.isp() ]) # TODO: multiple func versions
-                    rf = '{}({})'.format(fn,v)
-                if rt != 'void' and args.get('rn', None):
-                    ln('{} {} = {};', rt,args['rn'],rf)
-                    return rn
-                else:
-                    ln('{};', rf)
+                    v = ps.inargs( o, args ) # TODO: multiple func versions
+                    if v is not None:
+                        rf = '{}({})'.format(fn,v)
+                    else: # TODO: warn
+                        s._S = ps.gen_list( s, args ) # TODO: local vars
+                        rf = f( s )
+                if rf is not None:
+                    if rt != 'void' and args.get('rn', None):
+                        ln('{} {} = {};', rt, args['rn'],rf)
+                        return rn
+                    else:
+                        ln('{};', rf)
         return r
     return decor
 
@@ -285,80 +305,83 @@ link_func = {
         '...': lambda o: o.go_proc()
 }
 class link_path: # TODO: move to config_parent ?
-    def _get( s, t ):
-        try:
-            for i in t:
-                if i.startswith( '.' ):
-                    try: # TODO: nop default ?
-                        s = link_func[i]( s )
-                    except AttributeError:
-                        raise NotImplementedError( 'no path command: \'%s\'' % str(i) )
-                else:
-                    try:
-                        s = getattr( s, i )
-                    except AttributeError: # TODO: cut recursion, better error
-                        s = s._p.get( s._l )
-                        while True:
-                            try:
-                                s = getattr( s, i )
-                                break
-                            except AttributeError:
-                                s = s._p.get( s._l )
-            return s
-        except AttributeError:
-            raise LookupError( 'no path \'%s\'' % ('/'.join(t)) )
+    # def _get( s, t ):
+        # try:
+            # t.reverse()
+            # while t:
+                # i = t.pop()
+                # if i.startswith( '.' ):
+                    # try:
+                        # s = link_func[i]( s )
+                    # except AttributeError: # TODO: nop default ?
+                        # raise NotImplementedError( 'no path command: \'%s\'' % str(i) )
+                # else:
+                    # try:
+                        # s = getattr( s, i )
+                    # except AttributeError: # TODO: cut recursion, better error
+                        # l = s._l.split('/')
+                        # l.reverse()
+                        # t.extend( l )
+                        # s = s._p
+            # FIXME: resolve link at the end of path
+            # return s
+        # except AttributeError:
+            # raise LookupError( 'no path \'{}\''.format( l ) )
 
     def get( s, l ):
         try:
-            for i in l.split( '/' ):
-                if i.startswith( '.' ):
-                    try: # TODO: nop default ?
-                        s = link_func[i]( s )
-                    except AttributeError:
-                        raise NotImplementedError( 'no path command: \'%s\'' % str(i) )
-                else:
-                    try:
-                        s = getattr( s, i )
-                    except AttributeError: # TODO: cut recursion, better error
-                        s = s._p.get( s._l )
-                        while True:
+            t = l.split( '/' )
+            t.reverse()
+            while True:
+                while t:
+                    i = t.pop()
+                    if i.startswith( '.' ):
+                        try:
+                            s = link_func[i]( s ) # call a standard path function
+                        except KeyError:
                             try:
-                                s = getattr( s, i )
-                                break
-                            except AttributeError:
-                                s = s._p.get( s._l )
-            try:
-                s = s._p.get( s._l )
-            except AttributeError:
-                pass
-            return s
+                                s = getattr( s, i )() # call a custom function from object
+                            except (AttributeError, TypeError):
+                                raise NotImplementedError('no path command: \'{}\''.format(i) ) # TODO: allow call a method here ?
+                    else:
+                        try:
+                            s = getattr( s, i )
+                        except AttributeError: # TODO: cut recursion
+                            t.append( i ) # try to get it once more
+                            t.extend( reversed( s._l.split('/') ) ) # TODO: lazy load here ?
+                            s = s._p
+                if hasattr( s, '_l' ): # go further if found a link
+                    t = s._l.split('/') # TODO: lazy load here ?
+                    t.reverse()
+                    s = s._p
+                else:
+                    return s
         except AttributeError:
-            raise LookupError( 'no path \'%s\'' % l )
+            raise LookupError( 'path \'{}\' not found'.format( l ) ) # FIXME: search for debug info ?
 
-    def get_dep( s, l, p ):
+    def get_dep( s, l, p ): # !!!!!!!!!!!!
         try:
-            if s._p is p: return s
-            for i in l.split( '/' ):
+            t = l.split( '/' )
+            t.reverse()
+            while t:
+                i = t.pop()
                 if i.startswith( '.' ):
-                    try: # TODO: nop default ?
+                    try:
                         s = link_func[i]( s )
-                    except AttributeError: # KeyError ?
+                    except AttributeError: # TODO: nop default ?
                         raise NotImplementedError( 'no path command: \'%s\'' % str(i) )
                 else:
                     try:
                         s = getattr( s, i )
                     except AttributeError: # TODO: cut recursion, better error
-                        s = s._p.get( s._l ) # !!!!!!!!!!! get_dep
-                        while True:
-                            try:
-                                s = getattr( s, i )
-                                break
-                            except AttributeError:
-                                if s._p is p: return s
-                                s = s._p.get( s._l ) # !!!!!!!!!!! get_dep
-            return s
+                        l = s._l.split('/')
+                        l.reverse()
+                        t.extend( l )
+                        s = s._p
+                if s._p is p: return s
+                # FIXME: resolve link at the end of path
         except AttributeError:
-            raise LookupError( 'no path \'%s\'' % l )
+            raise LookupError( 'no path \'{}\''.format( l ) )
 
     def unlink( s, l ):
         t = l.split('/')
@@ -380,23 +403,20 @@ class link_path: # TODO: move to config_parent ?
 #            pass
         setattr( o, n, v )
 
-#    def set_cfg( s, l, c ):
-#        t = l.split('/')
-#        o = s._get( t[:-1] )
-#        n = t[-1]
-#        c = c.cp()
-#        setattr( o, n, c )
-#        c._p = o
-#        c.imported()
-
     def get_obj_list( s, l, t ):
         return [ ( n, i.n ) for n,i in s.get(l).__dict__.items()
                 if i.__class__.__name__.startswith( t ) ]
 
-    def v( s ):
-        while hasattr( s, '_l' ):
-            s = s.get( s._l )
-        return s
+    def get_path( s ):
+        try:
+            return '{}/{}'.format( s._n, s._p.get_path() )
+        except AttributeError:
+            return ''
+
+    # def v( s ):
+        # while hasattr( s, '_l' ):
+            # s = s.get( s._l )
+        # return s
 
     def link_reconfigure( s, l, c ):
         t = l.split('/')
@@ -406,23 +426,8 @@ class link_path: # TODO: move to config_parent ?
 class config_descr:
     def __init__( s, d, tt, ff=[] ):
         s.d = d
-        s.tt = [ input_descr( *i ) for i in tt ]
+        s.tt = tt #[ input_descr( *i ) for i in tt ]
         s.ff = ff
-
-class input_descr:
-    def __init__( s, n, vd, fv, sl={}, update=False, pdescr=None ):
-        s.n = n
-        s.vd = vd
-        s.fv = fv
-        s.sl = sl
-        if update: s.update = update
-        if pdescr: s.pdescr = pdescr
-
-    def up( s ):
-        try:
-            return s.update
-        except AttributeError:
-            return False
 
 def change_list_cb( cb, s, n, ucb=None ):
     model = cb.get_model()
@@ -494,8 +499,21 @@ def gen_proc_view( t ): # to render
 class config_parent( link_path, xml_storable ):
 
     ev_act = { # type, button, state(func keys)
-            (Gdk.EventType.BUTTON_PRESS, 3, 0) : lambda e, ev:e.menu().popup_at_pointer( ev )
+            (Gdk.EventType.BUTTON_PRESS, 3, 0) : lambda e, ev: e.menu().popup_at_pointer( ev )
     }
+
+    def call_act( s, e, w=None, c=None ):
+        try:
+            t = (e.type, e.button, e.state)
+            print(*t)
+            act = (ev_act.get(t, None)
+                   or ev_act.get((*t, w), None)
+                   or ev_act.get((*t, c), None)
+                   or ev_act.get((*t, w, c), None)
+            )
+            act( s, e )
+        except (KeyError, AttributeError, TypeError) as e:
+            pass
 
     def get_icon( s ):
         return getattr( s, 'icon', 'edit-copy' )
@@ -557,27 +575,28 @@ class config_parent( link_path, xml_storable ):
             del d[n]
 
     def find_deps( s, p ):
-        r = { s.get_dep( l, s ) for l in s.deps() }
-        for i in s.__dict__.values():
-            try:
-                r |= i.find_deps( p )
-            except AttributeError:
-                pass
+        r = set() #{ s.get_dep( l, s ) for l in s.deps() }
+        for n, i in s.__dict__.items():
+            if not n.startswith('_'):
+                try:
+                    r |= i.find_deps( p )
+                except AttributeError:
+                    pass
         return r
 
     # returns child names in dependency order
     def find_child_order( s ): #TODO: dependency cache
         d = {}
         od = {}
-        e = { i for i in s.__dict__.values() if isinstance( i, config_parent ) }
-        r = []
+        e = { i for n,i in s.__dict__.items() if hasattr( i, 'find_deps') and not n.startswith('_') }
         for n,i in s.__dict__.items():
-            if i in e:
-                try:
-                    d[i] = set( i.find_deps( s ) ) & e
+            try:
+                if i in e:
+                    d[i] = i.find_deps( s ) & e
                     od[i] = n
-                except AttributeError:
-                    pass
+            except (AttributeError, TypeError):
+                pass
+        r = []
         t = [ o for o,i in d.items() if not i ]
         while t:
             t2 = []
@@ -588,36 +607,46 @@ class config_parent( link_path, xml_storable ):
                     dd=d[j]
                     dd.discard(i)
                     if not dd:
-                        t2.append()
-                        dd.add(None)
+                        t2.append(i)
             t=t2
-        for o,dd in d:
-            if dd != {None}:
-                # TODO: dependency warning
+        for o,dd in d.items():
+            if dd:
+                # TODO: dependency cycle warning
                 r.append( od[o] )
         return r
+
+    def _check_links( s, d ):
+        for n,i in s.__dict__.items():
+            try:
+                if hasattr(i, '_l'):
+                    d.setdefault(s.get(i._l),[]).append(i)
+            except LookupError:
+                print( 'WARNING: broken link {}'.format(i.get_path()) ) # TODO: error, warning log
+                pass # TODO: log broken link
+            try:
+                i._check_links( d )
+            except AttributeError:
+                pass
+
+    def check_links( s ):
+        d = {}
+        s._check_links( d )
+        for o, l in d.items():
+            if len(l) >= 2: # TODO: multiple option in links
+                print( 'WARNING: multiple reference to {} from:'.fromat(o.get_path()) ) # TODO: error log, console ?
+                print( '\n'.join(['    {}'.format(i.get_path()) for i in l]) )
 
     def wctx( s ):
         try:
             return s._wctx
         except AttributeError:
-            w = s._p.wctx()
-            s._wctx = w
-            return w
+            r = s._p.wctx()
+            s._wctx = r
+            return r
 
     def get_tooltip( s ):
         if not hasattr( s, 'descr_short' ): return s.n
         return s.descr_short()
-
-#    def close( s ):
-#        s.__dict__.pop( '_pb', None )
-
-#    def editing( s ):
-#        return hasattr( s, '_pb' )
-
-#    def rollup( s ):
-#        if hasattr( s, '_pb' ):
-#            del s._pb
 
     def show_window( s ):
         w = Gtk.Window()
@@ -649,8 +678,9 @@ class config_parent( link_path, xml_storable ):
                 try:
                     o = v.cp()
                 except AttributeError:
-                    o = v; # TODO: add cp to other objects
+                    o = v;
             setattr( r, n, o )
+        return r
 
     def default_name( s, o=None ):
         n = s.__class__.__name__
@@ -662,7 +692,7 @@ class config_parent( link_path, xml_storable ):
         return n+str(i)
 
     def clk_start( s ):
-        s.get_cfg('cstart')( s.pname() )
+        s.get_cfg('cstart')( s.clk_name() )
 
     # returns loaded config
     def load_cfg( s, n ):
@@ -676,13 +706,12 @@ class config_parent( link_path, xml_storable ):
         try:
             v = getattr( s, n )
             if v.__class__ is c.__class__: # FIXME: must be strict comparison ?
-                c.reconfigure( c )
+                v.reconfigure( c )
             else:
                 raise AttributeError # copy obj in except
         except AttributeError:
-            c = c.cp()
+            c = c.cp() # FIXME: what if no cp ?
             setattr( s, n, c )
-            c.imported()
             try:
                 c._p = s
                 c.imported()
@@ -700,7 +729,7 @@ class config_parent( link_path, xml_storable ):
                         setattr( s, n, i )
                 except AttributeError:
                     setattr( s, n, i )
-        # FIXME: remove other params ?
+        # FIXME: remove other params ? option ?
 
     def expander_cb( s, e ):
         if not e.get_expanded():
@@ -834,10 +863,9 @@ class config_parent( link_path, xml_storable ):
         cd = s.descr
         ucb = s.update_all
         o = s.__dict__
-        for i in cd.tt:
-            n = i.n
-            u = not i.sl
-            for a,v in i.sl.items():
+        def frender( n, vd, fv, sl={}, od={} ):
+            u = not sl
+            for a,v in sl.items():
                 if a in o:
                     a = o[a]
                     if isinstance( v, tuple ):
@@ -846,10 +874,10 @@ class config_parent( link_path, xml_storable ):
             if u:
                 b = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
                 pb.add( b )
-                b.add( Gtk.Label( i.vd ) )
-                f = i.fv
+                b.add( Gtk.Label( vd ) )
+                f = fv
                 if isinstance( f, tuple ):
-                    b.add( gen_combo( s, n, f, ucb=( s.update_all if i.up() else None ) ) )
+                    b.add( gen_combo( s, n, f, ucb=( od.get('update',None) and s.update_all ) ) )
                 elif isinstance( f, str ):
                     pass
                 else:
@@ -861,6 +889,8 @@ class config_parent( link_path, xml_storable ):
                     l = f.disp( d, ucb )
                     for c in l: b.add( c )
             elif n in o: del o[n]
+        for i in cd.tt:
+            frender( *i )
         pb.show_all()
 
     def render_tiles( s, pb=None ):
@@ -874,9 +904,12 @@ class config_parent( link_path, xml_storable ):
         iv.set_pixbuf_column( 2 )
         iv.set_text_column( 1 )
         for n in s.child_order:
-            i = d[n]
-            pixbuf = Gtk.IconTheme.get_default().load_icon(i.get_icon(), 64, 0) # TODO: icon from class
-            pp = il.get_path( il.append([i, i.n, pixbuf]) )
+            try:
+                i = d[n]
+                pixbuf = Gtk.IconTheme.get_default().load_icon(i.get_icon(), 64, 0) # TODO: icon from class
+                il.get_path( il.append([i, i.n, pixbuf]) )
+            except AttributeError:
+                pass
         iv.set_property( 'has-tooltip', True )
         iv.connect( 'query-tooltip', iconview_tp_cb ) # TODO: method from class
         iv.connect( 'item-activated', iconview_ac_cb )
@@ -915,6 +948,7 @@ class config_parent( link_path, xml_storable ):
                 i.trow( t, tn )
             except AttributeError:
                 pass
+
     def menu( s ):
         m = Gtk.Menu()
         m.append(Gtk.ImageMenuItem("Yep it works!"))
@@ -924,13 +958,16 @@ class config_parent( link_path, xml_storable ):
 
 class link( xml_storable ):
     def __init__( s ):
-        s._l = '.'
+        s._l = '.' # TODO: _this reference ?
     def cp( s ):
         r = super().cp()
         if hasattr( s, '_l' ):
             r._l = s._l
         if hasattr( s, '_cfg' ):
             r._cfg = s._cfg
+        return r
+    def find_deps( s, p ):
+        return { s._p.get_dep( s._l, p ) }
     def gen_setup( s ):
         o = s._p.get( s.l )
         try:
@@ -992,15 +1029,6 @@ class freq_setup:
         r.append( Gtk.Label( '= '+cnv_num( fo.freq )+'Hz' ) )
         return r
 
-#class xml_list( list ): # is it used ?
-#    def xml_store( s, e ):
-#        a.attrib['l'] = '#'.join( s )
-#    def xml_load( s, e, cm ):
-#        s[:] = []
-#        l = e.attrib.get( 'l', None )
-#        if l:
-#            s.extend( l.split('#') )
-
 class func( xml_storable ):
     def __init__( s ):
         s.en = False
@@ -1034,7 +1062,7 @@ class objsel_setup:
         s.__dict__.update(locals())
         del s.s
     def obj( s ):
-        return link() # FIXME: params to chil object ?
+        return link() # FIXME: params to child object ?
     def setup_obj( s, btn, fo ): # TODO: handle error, show result ?
         o = fo._p
         o.link_reconfigure( fo._l, s.cfgn )

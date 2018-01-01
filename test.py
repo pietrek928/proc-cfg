@@ -3,7 +3,7 @@
 import stm
 import gui
 
-w = gui.Gtk.Window( title='aaaaaaaa' )
+# w = gui.Gtk.Window( title='aaaaaaaa' )
 pc = stm.processor()
 
 #p2 = stm.gpio_pin()
@@ -17,7 +17,7 @@ p.en = True
 #p.p=p
 #p.p2=p2
 p.tiles = True
-p.child_order = [  ]
+# p.child_order = [  ]
 p.tiles_edit = True
 #p2.p3=p
 #p2.tiles = True
@@ -34,17 +34,19 @@ pc.n = 'procek_xd'
 pc.gp = gp
 pc.fix_parent()
 
-#w = p.show_window() #"""
-#w.connect("destroy",gui.Gtk.main_quit)
-#w.show_all()
-
-gp.child_order = ['p']
+w = p.show_window() #"""
+w.connect("destroy",gui.Gtk.main_quit)
+w.show_all()
+while gui.Gtk.events_pending():
+    gui.Gtk.main_iteration()
+# gp.child_order = ['p']
 w = gp.show_window() #"""
 w.connect("destroy",gui.Gtk.main_quit)
 w.show_all()
 
 gui.Gtk.main()
 
+print( p.__dict__ )
 pc.gen_setup(decl=True)
 
 """

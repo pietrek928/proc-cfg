@@ -154,42 +154,42 @@ class struct_descr( xml_storable ):
                 break
 
 class periph_obj( xml_storable ):
-    def gen_setup( s, out, fn, fl, mode ): # TODO: faster version in C++
-        ln = out.ln
-        f = s.t._t[ fn ]
-        ln('   /* {}: {}  */'.format(f.get_descr(),fl))
-        zu = mode.zu
-        zz = mode.zz
-        if zz: zu=False
-        vv = [0]*f.ne
-        nbits = f.l*8
-        ones = (1<<nbits)-1
-        if zu:
-            uu = [ones]*f.ne
-        for n,v in fl.items():
-            ff = f.b[ n ]
-            nn = ff.b//nbits
-            ss = ff.b %nbits
-            vv[nn] |= int(v)<<ss # TODO: unconstant value
-            if zu and not mode.ww:
-                uu[nn] &= ~(((1<<(1 if not hasattr(ff,'e') else ((ff.e%nbits)-ss+1)))-1)<<ss);
-        fpos = s.a+f.off;
-        pp =( '=' if zz or mode.ww else '|=' ) # preserve previous
-        vol = ( 'volatile ' if mode.vol else '' )
-        for it in range(len(vv)): # TODO: preserve current vals
-            fp = '( *({}uint{}_t*){})'.format(vol, f.l*8, hex(fpos+it*f.l))
-            nv = None
-            av = None
-            if zz or vv[it]!=0:
-                nv = '0x%0*x' % (nbits//4,vv[it])
-            if zu and uu[it]!=just_ones:
-                av = '0x%0*x' % (nbits//4,uu[it])
-            if av and nv:
-                ln('{0}=((({0})&{1})|{2});'.format(fp, av, nv))
-            elif nv:
-                ln(fp+pp+nv+';')
-            elif av:
-                ln('{}&={};'.format(fp, av)) # TODO: negate flag
+    # def gen_setup( s, out, fn, fl, mode ): # TODO: faster version in C++
+        # ln = out.ln
+        # f = s.t._t[ fn ]
+        # ln('   /* {}: {}  */'.format(f.get_descr(),fl))
+        # zu = mode.zu
+        # zz = mode.zz
+        # if zz: zu=False
+        # vv = [0]*f.ne
+        # nbits = f.l*8
+        # ones = (1<<nbits)-1
+        # if zu:
+            # uu = [ones]*f.ne
+        # for n,v in fl.items():
+            # ff = f.b[ n ]
+            # nn = ff.b//nbits
+            # ss = ff.b %nbits
+            # vv[nn] |= int(v)<<ss # TODO: unconstant value
+            # if zu and not mode.ww:
+                # uu[nn] &= ~(((1<<(1 if not hasattr(ff,'e') else ((ff.e%nbits)-ss+1)))-1)<<ss);
+        # fpos = s.a+f.off;
+        # pp =( '=' if zz or mode.ww else '|=' ) # preserve previous
+        # vol = ( 'volatile ' if mode.vol else '' )
+        # for it in range(len(vv)): # TODO: preserve current vals
+            # fp = '( *({}uint{}_t*){})'.format(vol, f.l*8, hex(fpos+it*f.l))
+            # nv = None
+            # av = None
+            # if zz or vv[it]!=0:
+                # nv = '0x%0*x' % (nbits//4,vv[it])
+            # if zu and uu[it]!=just_ones:
+                # av = '0x%0*x' % (nbits//4,uu[it])
+            # if av and nv:
+                # ln('{0}=((({0})&{1})|{2});'.format(fp, av, nv))
+            # elif nv:
+                # ln(fp+pp+nv+';')
+            # elif av:
+                # ln('{}&={};'.format(fp, av)) # TODO: negate flag
     def __init__( s ):
         a=0
     def xml_store( s, e ):

@@ -268,23 +268,24 @@ with open( sys.argv[1] ) as f:
         except:
             print( 'reading line error; line: '+str(n) )
 
+n_obj_set[ 'GPIO' ].union_fields( [ [ 'CR', '' ] ] )
 n_obj_set[ 'ADC' ].union_fields( [ [ 'CR', '' ], [ 'SMPR1', '' ], [ 'JOFR', '' ], [ 'SQR', '' ] ] )
 n_obj_set[ 'RCC' ].union_fields( [ [ '', 'ENR' ] ] )
 
-processor.store_file( 'a.xml', n='proc' )
+processor.store_file( 'periph_config/stm.xml', n='proc' )
 
 from sys import modules
 from gui import load_file
-tst = load_file( 'a.xml', pc )
+tst = load_file( 'periph_config/stm.xml', pc )
 periph_data = tst.periph_data
 
 import processor as pp
-oo = pp.out_proc()
-mm = pp.mode_obj()
-mm.vol = True
-#mm.zz = True
-mm.zu = True
-periph_data[ 'RCC' ].gen_setup( oo, 'ENR', {'ADC1EN':1}, mm ) #"""
+# oo = pp.out_proc()
+# mm = pp.mode_obj()
+# mm.vol = True
+# mm.zz = True
+# mm.zu = True
+# periph_data[ 'RCC' ].gen_setup( oo, 'ENR', {'ADC1EN':1}, mm ) #"""
 
 """
 pp = Et.Element('processor')
