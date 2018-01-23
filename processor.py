@@ -6,8 +6,6 @@ from gui import *
 from copy import copy
 from periph_class import proc_cfg
 
-P = param_t
-
 class processor( config_parent ):
     proc_cfg = None
     def write_start( s ):

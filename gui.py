@@ -206,59 +206,52 @@ def cnv_num( n ):
     else: nn='{:.4f}'.format(n)
     return nn+k
 
-
-def pproc( o, d, n, v=None, opt={} ):
-    try:
-        return (n, d[n])
-    except KeyError: # TODO: name of param inside function
-        try:
-            return (n, getattr(o, n))
-        except AttributeError:
-            try:
-                return (n, # TODO: type, link ?
-                    getattr( o, v[1:], None ) if v.startswith('$') else v
-                )
-            except AttributeError:
-                return (n, v)
-
 class param_set:
+    class param:
+        def __init__(s, n, v=None, isp=None):
+            s.n = n
+            s.v = v
+            s.isp = isp
+        def val(s, o, d):
+            n = s.n
+            try:
+                return d[n]
+            except KeyError: # TODO: name of param inside function
+                try:
+                    return getattr(o, n)
+                except AttributeError:
+                    v = s.v
+                    try: # TODO: type, link ?
+                        return (getattr( o, v[1:], None ) if v.startswith('$') else v)
+                    except AttributeError:
+                        return v
+        def fp( s ):
+            return '{} {}'.format(s.t, s.n)
     def __init__( s, *p ):
-        s.p = p
-    def gen_list( s, o, d ):
-        return dict( pproc(o, args, *p) for p in s.p)
-    def gen_list_p( s, o, d ):
-        return dict( pproc(o, args, *p) if else (n, n) for p in s.p)
+        s.p = [s.param(*i) for i in p]
+    def scall( s, o, d ):
+        return dict( p.val(o, d) for p in s.p)
+    def sdecl( s, o, d ):
+        return { p.n:( p.n if p.isp else p.val(o, d)) for p in s.p}
     def decl( s ):
         l = []
-        for i in
-        return ','.join([ '{} {}'.format(t, n) for n, v in s.p if  ])
-    def inargs( s, o, d ):
-        l = []
-        for i in s.p:
-            n = i[0]
-            if len(i) >= 4 and i[4].get('p', None):
-                l.append(
-                    args[n] if n not in args else pproc(*i)[1]
-                )
-            else:
-                if n in args and args[n] != pproc(*i)[1]:
-                    args['inline'] = True
-                    return None
-        return ','.join(l)
+        return ','.join([ p.fp() for p in s.p if p.isp ])
+    def call( s, o, d ):
+        return ','.join([ p.val(o, d) for p in s.p if p.isp ])
 
 def setup_params( *params ):
     ps = param_set( *params )
     def decor( f ):
         def r( s, *a, **args ):
-            s._S = ps.gen_list( s, args )
+            s._S = ps.sdecl( s, args )
             return f( s, *a )
         return r
     return decor
 
 def gen_func( *params, rt='void' ): # TODO: name prefix ? object, class, namespace ?
-    ps = param_set( *params )
     def decor( f ):
         def r( s, **args ): # c / c++ selection ?
+            ps = param_set( *params )
             ln = s.wctx().ln
             try:
                 c = getattr( s, '_fcfg_'+f.__name__ )
@@ -270,7 +263,7 @@ def gen_func( *params, rt='void' ): # TODO: name prefix ? object, class, namespa
                 ln('{} {}({}) {{', # TODO: attrs ?
                     rt, fn, ps.decl()
                 )
-                s._S = ps.gen_list_p( s, args )
+                s._S = ps.sdecl( s, args )
                 rn = f( s )
                 if rt != 'void':
                     ln('return {};', rn)
@@ -278,19 +271,22 @@ def gen_func( *params, rt='void' ): # TODO: name prefix ? object, class, namespa
             else:
                 if not c.en:
                     print('function {} is used but not enabled'.format(fn)) # FIXME: warn
-                if args.get('inline',None) or getattr(c, 'inline', None):
-                    s._S = ps.gen_list( s, args ) # TODO: local vars
+                inl = args.get('inline',None) or getattr(c, 'inline', None)
+                if not inl:
+                    try:
+                        v = ps.call( s, args ) # TODO: multiple func versions
+                    except ValueError:
+                        inl = True
+                if inl:
+                    s._S = ps.scall( s, args ) # TODO: local vars
                     rf = f( s ) # TODO: conversion ? return type ?
-                else:
-                    v = ps.inargs( o, args ) # TODO: multiple func versions
-                    if v is not None:
-                        rf = '{}({})'.format(fn,v)
-                    else: # TODO: warn
-                        s._S = ps.gen_list( s, args ) # TODO: local vars
-                        rf = f( s )
+                elif v is not None:
+                    rf = '{}({})'.format(fn,v)
+                else: # TODO: warn
+                    raise ValueError('invalid arguments')
                 if rf is not None:
                     if rt != 'void' and args.get('rn', None):
-                        ln('{} {} = {};', rt, args['rn'],rf)
+                        ln('{} {} = {};', rt, args['rn'], rf)
                         return rn
                     else:
                         ln('{};', rf)
