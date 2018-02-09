@@ -436,32 +436,29 @@ def change_list_cb( cb, s, n, ucb=None ):
 # f: option list, tuple: ( descr, value )
 # ucb: update callback on change
 def gen_combo( o, n, f, ucb=None ):
-    if not f: return Gtk.Box()
-    ee = f[0]
-    ii = 0
-    _ii = 0
-    vv=getattr( o, n, None )
-    if isinstance( ee, tuple ):
+    try:
+        fo = f
+        if hasattr( f, 'dl' ):
+            f = list( f.dl() )
+        ee = f[0]
+        vv=getattr( o, n, None )
         names = Gtk.ListStore( type(ee[0]), type(ee[1]) )
         for a in f:
             names.append( list( a ) )
-            if a[-1] == vv: ii=_ii
-            _ii+=1
-        ee = ee[1]
-    else:
-        names = Gtk.ListStore( type(ee) )
-        for a in f:
-            names.append( [ a ] )
-            if a == vv: ii=_ii
-            _ii+=1
-    if not hasattr( o, n ): setattr( o, n, ee )
-    cb = Gtk.ComboBox.new_with_model(names)
-    cb.set_active( ii )
-    r = Gtk.CellRendererText()
-    cb.pack_start(r, True)
-    cb.add_attribute( r, 'text', 0 )
-    cb.connect("changed", change_list_cb, o, n, ucb)
-    return cb
+        try:
+            pos = fo.index(getattr(o, n))
+        except:
+            pos = 0
+            setattr( o, n, ee[-1] )
+        cb = Gtk.ComboBox.new_with_model(names)
+        cb.set_active( pos )
+        r = Gtk.CellRendererText()
+        cb.pack_start(r, True)
+        cb.add_attribute( r, 'text', 0 )
+        cb.connect("changed", change_list_cb, o, n, ucb)
+        return cb
+    except:
+        return Gtk.Box()
 
 def gen_proc_view( t ): # to render
     tl = len( t )//4

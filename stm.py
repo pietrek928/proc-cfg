@@ -15,6 +15,8 @@ CD = config_descr
 FS = func_setup
 #freq_descr = gui.freq_descr
 
+# stm32f1 !!!!!!
+
 parent_cfg = processor.proc_cfg
 class processor( processor ):
     model = __name__ # TODO: single function
@@ -42,6 +44,22 @@ class processor( processor ):
 #        return write_ctx( s.get_periph( pd.pname() ), s )
     # get periph regs ?
 
+class enum( tuple ):
+    def __new__(s, *n, **o):
+        return super().__new__(s, n)
+    def __init__(s, *n, **o):
+        s.o = o
+    def index(s, n):
+        if n>len(s):
+            raise ValueError('invalid index {}'.format(n))
+        return n
+    def dl(s):
+        return zip(s, range(len(s))) # TODO: l for dropdown ?
+    def m(s):
+        return dict(s.l())
+    def r(s, v):
+        return s.index(v)
+
 class gpio( config_parent ):
     @gen_func()
     def gen_setup( s ): # TODO: parametrized setup ?
@@ -66,7 +84,7 @@ class gpio( config_parent ):
     descr = CD(
         'GPIO port setup',
         [
-            ( '_fcfg_gen_setup', 'Generate setup', FS() ),
+            ( '_fcfg_gen_setup', 'Generate setup', FS() ), # TODO: template for functions fields
         ],
     )
 
@@ -88,11 +106,15 @@ class gpio_pin( config_parent ):
     def descr_pname( s ):
         return s._p.descr_pname()+str(s.num)
 
+    SPD = enum(10, 2, 5, disp=lambda n: '{} MHz'.format(n))
+    IM = enum('analog', 'floating', 'up', 'down')
+    OM = enum('push-pull', 'open-drain')
+
     @setup_params(
-        ('m', 'in'),
-        ('spd', 2),
-        ('in_mode', 'floating'),
-        ('out_mode', 0), # TODO: enum class ?
+        ('m', 'in'), # TODO: common default set ?????????
+        ('spd', SPD.rev(2)),
+        ('in_mode', IM.rev('floating')),
+        ('out_mode', OM.rev(0)),
         ('v', 0)
     )
     def setup_regs( s, cr, bsrr ):
@@ -100,27 +122,25 @@ class gpio_pin( config_parent ):
         nn = str(s.num)
         m = P( 'm' )
         if m in ( 'out', 'afio' ):
-            cr['MODE'+nn] = P( 'spd' )
-            cr['CNF'+nn] = 2 + P( 'out_mode' )
-            bsrr[( 'BR' if P('v')==0 else 'BS' )+nn] = 1
+            cr['MODE'+nn] = 1 + P( 'spd' )
+            cr['CNF'+nn] = P( 'out_mode' )
             if m == 'afio': cr['CNF'+nn] |= 0x02
+            bsrr[( 'BR' if P('v')==0 else 'BS' )+nn] = 1
         elif m == 'in':
             cr['MODE'+nn] = 0
             im = P( 'in_mode' )
-            if im == 'analog': cr['CNF'+nn] = 0
-            elif im == 'floating': cr['CNF'+nn] = 1
-            else:
-                cr['CNF'+nn] = 2
-                bsrr[( 'BR' if im=='down' else 'BS' )+nn] = 1
+            cr['CNF'+nn] = im
+            if im >= 2:
+                bsrr[( 'BR' if im==2 else 'BS' )+nn] = 1
 
     descr = CD(
         'GPIO pin setup',
         [
             ( 'm', 'Mode', ('out','in','afio'), {}, {'update':True} ),
-            ( 'afion', 'Afio number', (0,4), { 'm':'afio' } ),
-            ( 'out_mode', 'Output mode', (('push-pull',0),('open-drain',1)), { 'm':('afio','out') } ),
-            ( 'spd', 'Output speed', ( ('2MHz',2), ('10MHz',1), ('50MHz',3) ), { 'm':('afio','out') } ),
-            ( 'in_mode', 'Input mode', ('up','down','analog','floating'), { 'm':('in') } ),
+#            ( 'afion', 'Afio number', (0,4), { 'm':'afio' } ),
+            ( 'out_mode', 'Output mode', OM, { 'm':('afio','out') } ),
+            ( 'spd', 'Output speed', SPD, { 'm':('afio','out') } ),
+            ( 'in_mode', 'Input mode', IM, { 'm':('in') } ),
             ( '_fcfg_gen_setup', 'Genrate setup', FS() ),
             ( '_fcfg_val', 'Get value', FS(), { 'm':('afio','in') } ),
             ( '_fcfg_vset', 'Set high', FS(), { 'm':('afio','out') } ),
@@ -129,6 +149,49 @@ class gpio_pin( config_parent ):
             ( 'test_sel', 'Test selection', objsel_setup( '.', 'pin_cfg', 'gpio_pin'), { 'm':('afio','out') } ),
         ],
     )
+
+"""
+class tim_ch( config_parent ):
+    @setup_params(
+        ('ccm')
+    )
+    def setup_regs( s, ccmr, ccer ):
+        P = s.get_arg
+        m = P('ccm')
+        ccmr['CC'+s.n+'S']=m
+        if m == 0:
+            p = 'OC'+s.n
+            ccmr[p+'FE']=P('fast') # TODO: map parameters to registers
+            ccmr[p+'PE']=P('preload')
+            ccmr[p+'M']=P('om')
+            ccmr[p+'CE']=P('clear')
+        else:
+            p = 'IC'+s.n
+            ccmr[p+'PSC']=P('psc')
+            ccmr[p+'F']=P('filter')
+
+        p = 'CC'+s.n
+        ccer[p+'E'] = P('en')
+        ccer[p+'P'] = P('pol')
+        ccer[p+'NP'] = P('compen')
+        ccer[p+'NP'] = P('comppol')
+
+        descr = CD(
+            'TIM channel setup',
+            [
+                ( 'ccm', 'Compare / Capture mode', enum('Output', 'Capture TI1', 'Capture TI2', 'Capture TRC').l(), {}, {'update':True} ), # TODO: different map TI depending on register
+                ( 'psc', 'Prescaler', enum(1, 2, 4, 8), { 'ccm':'' } ), # TODO: lambda constraint
+                #( 'filter', 'Sampling frequency' ), # TODO: special widget ?
+                ( 'fast', 'Prescaler', , { 'ccm':'Output' } ), # TODO: enum constraint
+                ( 'preload', 'Preload', , { 'ccm':'Output' } ),
+                ( 'om', enum('frozen', '1 on match', '0 on match', 'Toggle on match', 'force 0', 'force 1', '1 -> cnt<ccr', '1 -> cnt>ccr'), , { 'ccm':'Output' } ),
+                ( 'clear', 'Clear on ETRF' , { 'ccm':'Output' }  ) # TODO: boolean field
+            ]
+        )
+
+class tim(config_parent):
+    /
+"""
 
 """
 p1 = gpio_pin()
