@@ -204,12 +204,12 @@ class tim_ch( config_parent ):
                 ( 'fast', 'Fast', BF(), { 'ccm':OM('Output') } ),
                 ( 'preload', 'Preload', BF(), { 'ccm':OM('Output') } ),
                 ( 'om', 'Output mode', OM, {}, { 'ccm':OM('Output') } ),
-                ( 'clear', 'Clear on ETRF' BF(), { 'ccm':OM('Output') }  )
+                ( 'clear', 'Clear on ETRF', BF(), { 'ccm':OM('Output') }  )
             ]
         )
 
-class tim(config_parent):
-    /
+# class tim(config_parent):
+    # /
 #"""
 
 """

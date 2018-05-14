@@ -7,6 +7,7 @@ from gi.repository.GdkPixbuf import Pixbuf
 from sys import modules
 #from gi.repository.Gdk import color_parse
 import xml.etree.ElementTree as Et
+import traceback
 
 ld_base = {
     's': str,
@@ -108,6 +109,18 @@ class xml_storable:
         })
         return r
 
+def vset_cb( o, n, cb=None ):
+    if cb:
+        def r(v = None):
+            if v is not None:
+                setattr(o, n, v)
+            cb()
+    else:
+        def r(v = None):
+            if v is not None:
+                setattr(o, n, v)
+    return ( getattr(o, n, None), r)
+
 def iconview_tp_cb( iv, x, y, kbd, tp ):
     try:
         p = iv.get_path_at_pos( x, y )[0]
@@ -146,7 +159,7 @@ def treeview_exp_cb( tv, it, p ):
         while n and m.remove( ci ):
             n -= 1
     except (AttributeError, TypeError) as e:
-        print(e)
+        print('treeview_exp_cb: ', e)
         return False # TODO: debug
     return True
 
@@ -169,7 +182,7 @@ def treeview_act_cb( tv, p, c, cb ):
         tv.expand_row( p, False )
         cb( e )
     except (AttributeError, TypeError) as e:
-        print(e)
+        print('treeview_act_cb', e)
         return False # TODO: debug
     return True
 
@@ -180,7 +193,7 @@ def treeview_sel_cb( tv, cb ):
         e = m.get_value( m.get_iter( p ), 0 )
         cb( e )
     except (AttributeError, TypeError) as e:
-        print(e)
+        print('treeview_sel_cb: ', e)
         return False # TODO: debug
     return True
 
@@ -192,7 +205,7 @@ def view_btn_cb( tv, ev ):
         e.call_act( e )  # TODO: different action depending on widget
         return True
     except (KeyError, AttributeError, TypeError) as e:
-        #print(e) #TODO: error logger
+        print('view_btn_cb: ', e) #TODO: error logger
         pass
 
 def cnv_num( n ):
@@ -425,18 +438,18 @@ class config_descr:
         s.tt = tt #[ input_descr( *i ) for i in tt ]
         s.ff = ff
 
-def change_combo_cb( cb, scb ):
+def change_combo_cb( cb, cbk ):
     model = cb.get_model()
     index = cb.get_active()
-    scb( model[index][-1] )
+    cbk( model[index][-1] )
 
-def change_checkbox_cb( b, scb ):
-    scb( b.get_active() )
+def change_checkbox_cb( b, cb ):
+    cb(b.get_active())
 
 # f: option list, tuple: ( descr, value )
 # v: current value
-# scb: setter callback
-def gen_combo( f, v, scb ):
+# cbk: setter callback
+def gen_combo( f, v, cbk ):
     try:
         fo = f
         if hasattr( f, 'dl' ):
@@ -445,7 +458,6 @@ def gen_combo( f, v, scb ):
         if not isinstance(ee, tuple):
             f = tuple([i] for i in f)
             ee = f[0]
-        vv=getattr( o, n, None )
         names = Gtk.ListStore(*[type(i) for i in list(ee)])
         for a in f:
             names.append( list( a ) )
@@ -453,16 +465,16 @@ def gen_combo( f, v, scb ):
             pos = fo.index(v)
         except:
             pos = 0
-            scb( ee[-1] )
+            cbk( ee[-1] )
         cb = Gtk.ComboBox.new_with_model(names)
         cb.set_active( pos )
         r = Gtk.CellRendererText()
         cb.pack_start(r, True)
         cb.add_attribute( r, 'text', 0 )
-        cb.connect("changed", change_list_cb, scb)
+        cb.connect("changed", change_combo_cb, cbk)
         return cb
     except Exception as e:
-        print(type(e),e)
+        print('gen_combo: ', e)
         return Gtk.Box()
 
 def gen_proc_view( t ): # to render
@@ -503,7 +515,6 @@ class config_parent( link_path, xml_storable ):
     def call_act( s, e, w=None, c=None ):
         try:
             t = (e.type, e.button, e.state)
-            print(*t)
             act = (ev_act.get(t, None)
                    or ev_act.get((*t, w), None)
                    or ev_act.get((*t, c), None)
@@ -788,11 +799,6 @@ class config_parent( link_path, xml_storable ):
         if not c.get_parent():
             s.close( n )
 
-    def vset_cb( s, n, cb=None ):
-        if cb:
-            return lambda v: (setattr(s, n, v),cb())
-        return lambda v: setattr(s, n, v)
-
     def close( s, n ):
         try:
             del s._v[n]
@@ -874,12 +880,13 @@ class config_parent( link_path, xml_storable ):
                         if a in v: u = True
                     elif a == v: u = True
             if u:
-                scb = s.vset_cb(n, od.get('update',None) and s.update_all) # TODO: update signal instead
+                cbk = vset_cb(s, n, od.get('update', None)
+                                and s.update_all)[1] # TODO: update signal instead
                 b = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
                 pb.add( b )
                 b.add( Gtk.Label( vd ) )
-                # if isinstance( f, tuple ):
-                    # b.add( gen_combo( s, n, f, ucb ) )
+                if isinstance( f, tuple ):
+                    f = select_field(*f)
                 # elif isinstance( f, str ):
                     # pass
                 # else:
@@ -887,10 +894,15 @@ class config_parent( link_path, xml_storable ):
                     d = o.get( n, None )
                     if d is None:
                         d = f.dv()
-                        d._p = s
+                        try:
+                            d._p = s
+                        except AttributeError:
+                            pass
                         o[n] = d
-                    l = f.disp( d, scb )
-                    for c in l: b.add( c )
+                    l = f.disp( d, cbk )
+                    if isinstance(l, list):
+                        for c in l: b.add( c )
+                    else: b.add(l)
             elif n in o: del o[n]
         for i in cd.tt:
             frender( *i )
@@ -1020,17 +1032,16 @@ class bool_field:
         return False
     def disp( s, fo, cb ):
         b = Gtk.CheckButton()
-        if fo:
-            b.set_active( True )
-        b.connect('toggled', change_list_cb, , )
+        b.set_active( fo )
+        b.connect('toggled', change_checkbox_cb, cb )
 
 class select_field:
-    def __init__(s, l):
+    def __init__(s, *l):
         s.l = l
-     def dv(s):
-         return s.l[0]
-     def disp( s, v, cb ):
-         return gen_combo(s.l, v, cb)
+    def dv(s):
+        return s.l[0]
+    def disp( s, v, cb ):
+        return gen_combo(s.l, v, cb)
 
 class freq_setup:
     def __init__( s, l, mul, div=() ):
@@ -1043,10 +1054,10 @@ class freq_setup:
     def disp( s, fo, cb ):
         r = [ Gtk.Label( 'X' ) ]
         if isinstance( s.mul, tuple ):
-            r.append( gen_combo( fo, 'mul', s.mul, cb ) )
+            r.append( gen_combo( s.mul, *vset_cb( fo, 'mul', cb ) ) )
         r.append( Gtk.Label( '/' ) )
         if isinstance( s.div, tuple ):
-            r.append( gen_combo( fo, 'div', s.div, cb ) )
+            r.append( gen_combo( s.div, *vset_cb( fo, 'div', cb ) ) )
         fo.update()
         r.append( Gtk.Label( '= '+cnv_num( fo.freq )+'Hz' ) )
         return r
@@ -1054,10 +1065,9 @@ class freq_setup:
 class func( xml_storable ):
     def __init__( s ):
         s.en = False
-    def update_cb( s, cb, nc, ucb=None ):
-        v = cb.get_active()
-        setattr( s, nc, v )
-        if ucb: ucb()
+    def update_cb( s, cb, nc, cbk=None ):
+        setattr( s, nc, cb.get_active() )
+        if cbk: cbk()
     def gen_code( s ):
         getattr( s._p, s._n )( decl=True )
         args.update({n:v(s._p) for n,v in params}) # TODO: comment ?
@@ -1076,7 +1086,7 @@ class func_setup:
             bi = Gtk.CheckButton( 'inline' )
             bi.connect('clicked', fo.update_cb, 'inline')
             r.append( bi )
-        b_en.connect('clicked', fo.update_cb, 'en', fo._p.update_all)
+        b_en.connect('clicked', fo.update_cb, 'en', cb)
         return r
 
 class objsel_setup:
@@ -1097,7 +1107,7 @@ class objsel_setup:
         for n,i in sel_o.__dict__.items():
             if i.__class__.__name__.startswith( s.cn ) and not n.startswith( '_' ):
                 l.append( ( i.n, n ) )
-        b.add( gen_combo( fo, '_s', l, fo._p.update_all ) )
+        b.add( gen_combo( l, *vset_cb( fo, '_s', cb ) ) )
         try:
             fo._l = s.l+'/'+fo._s
             so = fo._p.get( fo._l )
