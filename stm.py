@@ -53,8 +53,21 @@ class enum( tuple ):
         if n>len(s):
             raise ValueError('invalid index {}'.format(n))
         return n
+    def __call__(s, v): # __call__ ?
+        return super().index(v)
+    def vall(s, *v):
+        f = super().index
+        return (f(i) for i in v)
+    def vallp(s, p):
+        f = super().index
+        return (f(i) for i in s if i.startswith(p))
     def dl(s):
-        return zip(s, range(len(s))) # TODO: l for dropdown ?
+        try:
+            f = s.o['disp']
+            s = tuple(f(i) for i in s)
+        except:
+            pass
+        return zip(s, range(len(s)))
     def m(s):
         return dict(s.l())
     def r(s, v):
@@ -112,9 +125,9 @@ class gpio_pin( config_parent ):
 
     @setup_params(
         ('m', 'in'), # TODO: common default set ?????????
-        ('spd', SPD.rev(2)),
-        ('in_mode', IM.rev('floating')),
-        ('out_mode', OM.rev(0)),
+        ('spd', SPD(2)),
+        ('in_mode', IM('floating')),
+        ('out_mode', OM('push-pull')),
         ('v', 0)
     )
     def setup_regs( s, cr, bsrr ):
@@ -150,8 +163,13 @@ class gpio_pin( config_parent ):
         ],
     )
 
-"""
 class tim_ch( config_parent ):
+    # TODO: different map TI depending on register
+    CCM = enum('Output', 'Capture TI1', 'Capture TI2', 'Capture TRC')
+    OM = enum('frozen', '1 on match', '0 on match', 'Toggle on match',
+            'force 0', 'force 1', '1 <- cnt<ccr', '1 <- cnt>ccr')
+    PSC = enum(1, 2, 4, 8)
+
     @setup_params(
         ('ccm')
     )
@@ -179,19 +197,20 @@ class tim_ch( config_parent ):
         descr = CD(
             'TIM channel setup',
             [
-                ( 'ccm', 'Compare / Capture mode', enum('Output', 'Capture TI1', 'Capture TI2', 'Capture TRC').l(), {}, {'update':True} ), # TODO: different map TI depending on register
-                ( 'psc', 'Prescaler', enum(1, 2, 4, 8), { 'ccm':'' } ), # TODO: lambda constraint
-                #( 'filter', 'Sampling frequency' ), # TODO: special widget ?
-                ( 'fast', 'Prescaler', , { 'ccm':'Output' } ), # TODO: enum constraint
-                ( 'preload', 'Preload', , { 'ccm':'Output' } ),
-                ( 'om', enum('frozen', '1 on match', '0 on match', 'Toggle on match', 'force 0', 'force 1', '1 -> cnt<ccr', '1 -> cnt>ccr'), , { 'ccm':'Output' } ),
-                ( 'clear', 'Clear on ETRF' , { 'ccm':'Output' }  ) # TODO: boolean field
+                ( 'ccm', 'Compare / Capture mode', CCM, {}, {'update':True} ),
+                ( 'psc', 'Prescaler', PSC, { 'ccm':CCM.revlp('Capture') } ),
+                #( 'filter', 'Sampling frequency' ),
+                # TODO: filter frequency widget ?
+                ( 'fast', 'Fast', BF(), { 'ccm':OM('Output') } ),
+                ( 'preload', 'Preload', BF(), { 'ccm':OM('Output') } ),
+                ( 'om', 'Output mode', OM, {}, { 'ccm':OM('Output') } ),
+                ( 'clear', 'Clear on ETRF' BF(), { 'ccm':OM('Output') }  )
             ]
         )
 
 class tim(config_parent):
     /
-"""
+#"""
 
 """
 p1 = gpio_pin()

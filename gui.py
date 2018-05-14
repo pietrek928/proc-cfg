@@ -425,39 +425,44 @@ class config_descr:
         s.tt = tt #[ input_descr( *i ) for i in tt ]
         s.ff = ff
 
-def change_list_cb( cb, s, n, ucb=None ):
+def change_combo_cb( cb, scb ):
     model = cb.get_model()
     index = cb.get_active()
-    setattr( s, n, model[index][-1] )
-    if ucb: ucb()
+    scb( model[index][-1] )
 
-# o: object that contains variable
-# n: variable name
+def change_checkbox_cb( b, scb ):
+    scb( b.get_active() )
+
 # f: option list, tuple: ( descr, value )
-# ucb: update callback on change
-def gen_combo( o, n, f, ucb=None ):
+# v: current value
+# scb: setter callback
+def gen_combo( f, v, scb ):
     try:
         fo = f
         if hasattr( f, 'dl' ):
             f = list( f.dl() )
         ee = f[0]
+        if not isinstance(ee, tuple):
+            f = tuple([i] for i in f)
+            ee = f[0]
         vv=getattr( o, n, None )
-        names = Gtk.ListStore( type(ee[0]), type(ee[1]) )
+        names = Gtk.ListStore(*[type(i) for i in list(ee)])
         for a in f:
             names.append( list( a ) )
         try:
-            pos = fo.index(getattr(o, n))
+            pos = fo.index(v)
         except:
             pos = 0
-            setattr( o, n, ee[-1] )
+            scb( ee[-1] )
         cb = Gtk.ComboBox.new_with_model(names)
         cb.set_active( pos )
         r = Gtk.CellRendererText()
         cb.pack_start(r, True)
         cb.add_attribute( r, 'text', 0 )
-        cb.connect("changed", change_list_cb, o, n, ucb)
+        cb.connect("changed", change_list_cb, scb)
         return cb
-    except:
+    except Exception as e:
+        print(type(e),e)
         return Gtk.Box()
 
 def gen_proc_view( t ): # to render
@@ -783,6 +788,11 @@ class config_parent( link_path, xml_storable ):
         if not c.get_parent():
             s.close( n )
 
+    def vset_cb( s, n, cb=None ):
+        if cb:
+            return lambda v: (setattr(s, n, v),cb())
+        return lambda v: setattr(s, n, v)
+
     def close( s, n ):
         try:
             del s._v[n]
@@ -854,9 +864,8 @@ class config_parent( link_path, xml_storable ):
 
     def render_fields( s, pb=None, show_tiles=False ): # TODO: some renderers
         cd = s.descr
-        ucb = s.update_all
         o = s.__dict__
-        def frender( n, vd, fv, sl={}, od={} ):
+        def frender( n, vd, f, sl={}, od={} ):
             u = not sl
             for a,v in sl.items():
                 if a in o:
@@ -865,21 +874,22 @@ class config_parent( link_path, xml_storable ):
                         if a in v: u = True
                     elif a == v: u = True
             if u:
+                scb = s.vset_cb(n, od.get('update',None) and s.update_all) # TODO: update signal instead
                 b = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
                 pb.add( b )
                 b.add( Gtk.Label( vd ) )
-                f = fv
-                if isinstance( f, tuple ):
-                    b.add( gen_combo( s, n, f, ucb=( od.get('update',None) and s.update_all ) ) )
-                elif isinstance( f, str ):
-                    pass
-                else:
+                # if isinstance( f, tuple ):
+                    # b.add( gen_combo( s, n, f, ucb ) )
+                # elif isinstance( f, str ):
+                    # pass
+                # else:
+                if True:
                     d = o.get( n, None )
                     if d is None:
-                        d = f.obj()
+                        d = f.dv()
                         d._p = s
                         o[n] = d
-                    l = f.disp( d, ucb )
+                    l = f.disp( d, scb )
                     for c in l: b.add( c )
             elif n in o: del o[n]
         for i in cd.tt:
@@ -1003,11 +1013,30 @@ class freq( link ):
         src_freq = s._p.get(s.l)
         s.freq = float(src_freq)*float(s.mul)/float(s.div)
 
+class bool_field:
+    def __init__( s ):
+        pass
+    def obj( s ):
+        return False
+    def disp( s, fo, cb ):
+        b = Gtk.CheckButton()
+        if fo:
+            b.set_active( True )
+        b.connect('toggled', change_list_cb, , )
+
+class select_field:
+    def __init__(s, l):
+        s.l = l
+     def dv(s):
+         return s.l[0]
+     def disp( s, v, cb ):
+         return gen_combo(s.l, v, cb)
+
 class freq_setup:
     def __init__( s, l, mul, div=() ):
         s.__dict__.update(locals())
         del s.s
-    def obj( s ):
+    def dv( s ):
         r = freq()
         r.l = s.l
         return r
@@ -1034,7 +1063,7 @@ class func( xml_storable ):
         args.update({n:v(s._p) for n,v in params}) # TODO: comment ?
 
 class func_setup:
-    def obj( s ):
+    def dv( s ):
         return func()
     def disp( s, fo, cb ):
         b_en = Gtk.CheckButton( 'en' )
@@ -1054,7 +1083,7 @@ class objsel_setup:
     def __init__( s, l, cfgn, cn ):
         s.__dict__.update(locals())
         del s.s
-    def obj( s ):
+    def dv( s ):
         return link() # FIXME: params to child object ?
     def setup_obj( s, btn, fo ): # TODO: handle error, show result ?
         o = fo._p
