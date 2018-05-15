@@ -456,7 +456,7 @@ def gen_combo( f, v, cbk ):
             f = list( f.dl() )
         ee = f[0]
         if not isinstance(ee, tuple):
-            f = tuple([i] for i in f)
+            f = tuple((i, ) for i in f)
             ee = f[0]
         names = Gtk.ListStore(*[type(i) for i in list(ee)])
         for a in f:
@@ -768,7 +768,7 @@ class config_parent( link_path, xml_storable ):
     def iv_drag_get( s, iv, ctx, sel, info, tm ):
         p = iv.get_selected_items()[0]
         if not p: return False
-        print('path',p)
+        print('path', p)
         m = iv.get_model()
         e = m.get_value( m.get_iter(p), 2 )
         print( 'get', e.n )
@@ -880,13 +880,13 @@ class config_parent( link_path, xml_storable ):
                         if a in v: u = True
                     elif a == v: u = True
             if u:
-                cbk = vset_cb(s, n, od.get('update', None)
+                cbk = vset_cb(s, n, ( getattr(f, 'update', None) or od.get('update', None) )
                                 and s.update_all)[1] # TODO: update signal instead
                 b = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
                 pb.add( b )
                 b.add( Gtk.Label( vd ) )
                 if isinstance( f, tuple ):
-                    f = select_field(*f)
+                    f = select_field(f)
                 # elif isinstance( f, str ):
                     # pass
                 # else:
@@ -1036,7 +1036,7 @@ class bool_field:
         b.connect('toggled', change_checkbox_cb, cb )
 
 class select_field:
-    def __init__(s, *l):
+    def __init__(s, l):
         s.l = l
     def dv(s):
         return s.l[0]
@@ -1073,6 +1073,8 @@ class func( xml_storable ):
         args.update({n:v(s._p) for n,v in params}) # TODO: comment ?
 
 class func_setup:
+    update = True
+
     def dv( s ):
         return func()
     def disp( s, fo, cb ):

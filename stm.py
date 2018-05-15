@@ -45,8 +45,8 @@ class processor( processor ):
     # get periph regs ?
 
 class enum( tuple ):
-    def __new__(s, *n, **o):
-        return super().__new__(s, n)
+    def __new__(self, *n, **o):
+        return tuple.__new__(enum, n)
     def __init__(s, *n, **o):
         s.o = o
     def index(s, n):
