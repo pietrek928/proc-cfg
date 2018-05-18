@@ -2,12 +2,15 @@
 
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, GObject
 from gi.repository.GdkPixbuf import Pixbuf
 from sys import modules
 #from gi.repository.Gdk import color_parse
 import xml.etree.ElementTree as Et
 import traceback
+
+GObject.signal_new("action", Gtk.Window, GObject.SIGNAL_RUN_LAST,
+        GObject.TYPE_NONE, (GObject.TYPE_PYOBJECT, GObject.TYPE_PYOBJECT))
 
 ld_base = {
     's': str,
@@ -441,10 +444,23 @@ class config_descr:
 def change_combo_cb( cb, cbk ):
     model = cb.get_model()
     index = cb.get_active()
-    cbk( model[index][-1] )
+    w = cb.get_toplevel()
+    w.emit('action', cbk, model[index][-1])
 
-def change_checkbox_cb( b, cb ):
-    cb(b.get_active())
+def change_checkbox_cb( b, cbk ):
+    w = b.get_toplevel()
+    w.emit('action', cbk, b.get_active())
+
+def gen_checkbox(v, cbk, name=''):
+    cb = Gtk.CheckButton(name)
+    cb.set_active(bool(v))
+    cb.connect('clicked', change_checkbox_cb, cbk)
+    return cb
+
+def new_window(tp=Gtk.Window, **a):
+    w = tp(**a)
+    w.connect('action', lambda w,f,v: f(v))
+    return w
 
 # f: option list, tuple: ( descr, value )
 # v: current value
@@ -658,7 +674,7 @@ class config_parent( link_path, xml_storable ):
         return s.descr_short()
 
     def show_window( s ):
-        w = Gtk.Window()
+        w = new_window()
         w.set_title( getattr( s, 'name', s.n ) )
         b = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         w.add( b )
@@ -1030,10 +1046,8 @@ class bool_field:
         pass
     def obj( s ):
         return False
-    def disp( s, fo, cb ):
-        b = Gtk.CheckButton()
-        b.set_active( fo )
-        b.connect('toggled', change_checkbox_cb, cb )
+    def disp( s, fo, cbk ):
+        return gen_checkbox(fo, cbk)
 
 class select_field:
     def __init__(s, l):
@@ -1044,6 +1058,8 @@ class select_field:
         return gen_combo(s.l, v, cb)
 
 class freq_setup:
+    update = True
+
     def __init__( s, l, mul, div=() ):
         s.__dict__.update(locals())
         del s.s
@@ -1066,6 +1082,7 @@ class func( xml_storable ):
     def __init__( s ):
         s.en = False
     def update_cb( s, cb, nc, cbk=None ):
+        print(nc, cb.get_active())
         setattr( s, nc, cb.get_active() )
         if cbk: cbk()
     def gen_code( s ):
@@ -1078,17 +1095,12 @@ class func_setup:
     def dv( s ):
         return func()
     def disp( s, fo, cb ):
-        b_en = Gtk.CheckButton( 'en' )
-        r = [ b_en ]
+        r = [
+            gen_checkbox(*vset_cb(fo, 'en', cb), name='en')
+        ]
         if fo.en:
-            b_en.set_active( True )
-            bv = Gtk.CheckButton( 'volatile' )
-            bv.connect('clicked', fo.update_cb, 'volatile')
-            r.append( bv )
-            bi = Gtk.CheckButton( 'inline' )
-            bi.connect('clicked', fo.update_cb, 'inline')
-            r.append( bi )
-        b_en.connect('clicked', fo.update_cb, 'en', cb)
+            r.append( gen_checkbox(*vset_cb(fo, 'volatile'), name='volatile') )
+            r.append( gen_checkbox(*vset_cb(fo, 'inline'), name='inline') )
         return r
 
 class objsel_setup:

@@ -37,8 +37,6 @@ pc.fix_parent()
 w = p.show_window() #"""
 w.connect("destroy",gui.Gtk.main_quit)
 w.show_all()
-while gui.Gtk.events_pending():
-    gui.Gtk.main_iteration()
 # gp.child_order = ['p']
 w = gp.show_window() #"""
 w.connect("destroy",gui.Gtk.main_quit)
