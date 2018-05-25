@@ -44,35 +44,6 @@ class processor( processor ):
 #        return write_ctx( s.get_periph( pd.pname() ), s )
     # get periph regs ?
 
-class enum( tuple ):
-    def __new__(self, *n, **o):
-        return tuple.__new__(enum, n)
-    def __init__(s, *n, **o):
-        s.o = o
-    def index(s, n):
-        if n>len(s):
-            raise ValueError('invalid index {}'.format(n))
-        return n
-    def __call__(s, v): # __call__ ?
-        return super().index(v)
-    def vall(s, *v):
-        f = super().index
-        return (f(i) for i in v)
-    def vallp(s, p):
-        f = super().index
-        return (f(i) for i in s if i.startswith(p))
-    def dl(s):
-        try:
-            f = s.o['disp']
-            s = tuple(f(i) for i in s)
-        except:
-            pass
-        return zip(s, range(len(s)))
-    def m(s):
-        return dict(s.l())
-    def r(s, v):
-        return s.index(v)
-
 class gpio( config_parent ):
     @gen_func()
     def gen_setup( s ): # TODO: parametrized setup ?
@@ -119,26 +90,22 @@ class gpio_pin( config_parent ):
     def descr_pname( s ):
         return s._p.descr_pname()+str(s.num)
 
-    SPD = enum(10, 2, 5, disp=lambda n: '{} MHz'.format(n))
-    IM = enum('analog', 'floating', 'up', 'down')
-    OM = enum('push-pull', 'open-drain')
-
     @setup_params(
         ('m', 'in'), # TODO: common default set ?????????
-        ('spd', SPD(2)),
-        ('in_mode', IM('floating')),
-        ('out_mode', OM('push-pull')),
+        ('spd', 2),
+        ('in_mode', 'floating'),
+        ('out_mode', 'push-pull'),
         ('v', 0)
     )
     def setup_regs( s, cr, bsrr ):
-        P = s.get_arg
+        P = s.get_arg_f() # TODO: put in decorator
         nn = str(s.num)
         m = P( 'm' )
         if m in ( 'out', 'afio' ):
             cr['MODE'+nn] = 1 + P( 'spd' )
             cr['CNF'+nn] = P( 'out_mode' )
             if m == 'afio': cr['CNF'+nn] |= 0x02
-            bsrr[( 'BR' if P('v')==0 else 'BS' )+nn] = 1
+            bsrr[( 'BR' if P('v') else 'BS' )+nn] = 1
         elif m == 'in':
             cr['MODE'+nn] = 0
             im = P( 'in_mode' )
@@ -151,9 +118,9 @@ class gpio_pin( config_parent ):
         [
             ( 'm', 'Mode', ('out','in','afio'), {}, {'update':True} ),
 #            ( 'afion', 'Afio number', (0,4), { 'm':'afio' } ),
-            ( 'out_mode', 'Output mode', OM, { 'm':('afio','out') } ),
-            ( 'spd', 'Output speed', SPD, { 'm':('afio','out') } ),
-            ( 'in_mode', 'Input mode', IM, { 'm':('in') } ),
+            ( 'out_mode', 'Output mode', 'ENUM', { 'm':('afio','out') } ),
+            ( 'spd', 'Output speed', 'ENUM', { 'm':('afio','out') } ),
+            ( 'in_mode', 'Input mode', 'ENUM', { 'm':('in') } ),
             ( '_fcfg_gen_setup', 'Genrate setup', FS() ),
             ( '_fcfg_val', 'Get value', FS(), { 'm':('afio','in') } ),
             ( '_fcfg_vset', 'Set high', FS(), { 'm':('afio','out') } ),
@@ -161,6 +128,11 @@ class gpio_pin( config_parent ):
             ( 'test_freq', 'Test freq', freq_setup( 'test_freq2', (1, 2, 3), (1, 2, 3) ), { 'm':('afio','out') } ),
             ( 'test_sel', 'Test selection', objsel_setup( '.', 'pin_cfg', 'gpio_pin'), { 'm':('afio','out') } ),
         ],
+        enums=enum_map(
+            spd= enum(10, 2, 5, disp=lambda n: '{} MHz'.format(n)),
+            in_mode= enum('analog', 'floating', 'up', 'down'),
+            out_mode= enum('push-pull', 'open-drain')
+        )
     )
 
 class tim_ch( config_parent ):

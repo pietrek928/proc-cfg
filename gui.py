@@ -112,6 +112,51 @@ class xml_storable:
         })
         return r
 
+class enum( tuple ):
+    def __new__(s, *n, **o):
+        return tuple.__new__(enum, n)
+    def __init__(s, *n, **o):
+        s.o = o
+    def index(s, n): # !!!!!! ???????
+        if n>len(s):
+            raise ValueError('invalid index {}'.format(n))
+        return n
+    def __call__(s, v):
+        return super().index(v)
+    def vall(s, *v):
+        f = super().index
+        return (f(i) for i in v)
+    def vallp(s, p):
+        f = super().index
+        return (f(i) for i in s if i.startswith(p))
+    def dl(s):
+        try:
+            f = s.o['disp']
+            return ( (f(i), i) for i in s )
+        except:
+            pass
+        return ( (i,) for i in s )
+    def m(s):
+        return dict(s.l())
+    def r(s, v):
+        return s.index(v)
+
+class enum_map:
+    def __init__(s, **d):
+        s.d = d
+    def _get_arg(s):
+        def get_arg(s, n):
+            try:
+                v = s._S[n]
+            except:
+                v = getattr(s, n)
+            try:
+                return s.d[n](v)
+            except:
+                return v
+
+        return get_arg
+
 def vset_cb( o, n, cb=None ):
     if cb:
         def r(v = None):
@@ -436,10 +481,12 @@ class link_path: # TODO: move to config_parent ?
         o.child_reconfig( c, t[-1] )
 
 class config_descr:
-    def __init__( s, d, tt, ff=[] ):
+    def __init__( s, d, tt, enums=None, ff=[] ):
         s.d = d
         s.tt = tt #[ input_descr( *i ) for i in tt ]
         s.ff = ff
+        if enums:
+            s.enums=enums
 
 def change_combo_cb( cb, cbk ):
     model = cb.get_model()
@@ -567,11 +614,26 @@ class config_parent( link_path, xml_storable ):
             return None
         return s
 
-    def get_arg( s, n ):
+    def get_arg_f(s):
         try:
-            return s._S[n]
+            md = s.descr.enums.d
+            def get_arg( n ):
+                try:
+                    v = s._S[n] # TODO: move var up ?
+                except:
+                    v = getattr(s, n)
+                try:
+                    return md[n](v)
+                except:
+                    return v
+            return get_arg
         except (AttributeError, KeyError):
-            return getattr( s, n )
+            def get_arg( n ):
+                try:
+                    return s._S[n]
+                except:
+                    return getattr( s, n )
+            return get_arg
 
     @gen_func()
     def gen_setup( s ):
@@ -901,6 +963,8 @@ class config_parent( link_path, xml_storable ):
                 b = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
                 pb.add( b )
                 b.add( Gtk.Label( vd ) )
+                if f == 'ENUM':
+                    f = cd.enums.d[n]
                 if isinstance( f, tuple ):
                     f = select_field(f)
                 # elif isinstance( f, str ):
