@@ -207,13 +207,18 @@ class proc_cfg( xml_storable):
         s.periph_data = {}
         s.types = nd()
         s.vars = {}
-    def import_cfg( s, n ):
-        try:
-            r = load_file( '{}/{}.xml'.format( s._cfg_dir, n ), s._cm )
-            r.cfg_name = n;
-            return r
-        except (KeyError, FileNotFoundError):
-            return s._pcfg.import_cfg( n )
+    def import_cfg( s, *n ):
+        r = None
+        for i in n:
+            try:
+                c = load_file( f'{s._cfg_dir}/{i}.xml', s._cm )
+            except (KeyError, FileNotFoundError):
+                c = s._pcfg.import_cfg( i )
+            if r:
+                r.reconfigure(c)
+            else: r=c
+        r.cfg_name = n if len(n) else n[0];
+        return r
     def get_type( s, n ): # TODO: cache
         try:
             return s.types[ n ]

@@ -21,7 +21,7 @@ class processor( config_parent ):
         s._imp_ch = {}
     def wctx( s ):
         return write_ctx( s.get_periph )
-    def import_cfg( s, n ): # TODO: cache
+    def import_cfg( s, n ):
         try:
             return s._imp_ch[n]
         except KeyError:

@@ -22,8 +22,9 @@ class processor( processor ):
     model = __name__ # TODO: single function
     proc_cfg = load_proc_cfg( cm=modules[__name__], cfg_dir='periph_config/'+model, f='periph_config/{}.xml'.format(model), pcfg=parent_cfg )
     get_periph = proc_cfg.get_periph
+
     def write_start( s ):
-        s.clks = []
+        s.clks = [] # TODO: as cache ?
         s.psets = {}
     def get_mode( s, n ):
         return mode_obj()
@@ -66,8 +67,7 @@ class gpio( config_parent ):
         return 'P'+s.id
 
     descr = CD(
-        'GPIO port setup',
-        [
+        'GPIO port setup', [
             ( '_fcfg_gen_setup', 'Generate setup', FS() ), # TODO: template for functions fields
         ],
     )
@@ -136,53 +136,96 @@ class gpio_pin( config_parent ):
     )
 
 class tim_ch( config_parent ):
-    # TODO: different map TI depending on register
-    CCM = enum('Output', 'Capture TI1', 'Capture TI2', 'Capture TRC')
-    OM = enum('frozen', '1 on match', '0 on match', 'Toggle on match',
-            'force 0', 'force 1', '1 <- cnt<ccr', '1 <- cnt>ccr')
-    PSC = enum(1, 2, 4, 8)
+    # TODO: different map TI depending on register, separate class ?
 
-    @setup_params(
-        ('ccm')
-    )
+    @setup_params()
     def setup_regs( s, ccmr, ccer ):
-        P = s.get_arg
-        m = P('ccm')
-        ccmr['CC'+s.n+'S']=m
-        if m == 0:
-            p = 'OC'+s.n
-            ccmr[p+'FE']=P('fast') # TODO: map parameters to registers
-            ccmr[p+'PE']=P('preload')
-            ccmr[p+'M']=P('om')
-            ccmr[p+'CE']=P('clear')
+        P = s.get_arg_f()
+        ccmr['CC'+s.n+'S']=P('ccm')
+        m = s.ccm
+        if m == 'Output':
+            set_multi( ccmr, 'OC'+s.n,
+                FE=P('fast'),  # TODO: map parameters to registers
+                PE=P('preload'),
+                M=P('out_mode'),
+                CE=P('clear')
+            )
         else:
-            p = 'IC'+s.n
-            ccmr[p+'PSC']=P('psc')
-            ccmr[p+'F']=P('filter')
+            set_multi( ccmr, 'IC'+s.n,
+                PSC=P('psc'),
+                F=P('filter')
+            )
 
-        p = 'CC'+s.n
-        ccer[p+'E'] = P('en')
-        ccer[p+'P'] = P('pol')
-        ccer[p+'NP'] = P('compen')
-        ccer[p+'NP'] = P('comppol')
+        set_multi( ccer, 'CC'+s.n,
+            E = P('en'),
+            P = P('pol'),
+            NE = P('compen'),
+            NP = P('comppol')
+        )
 
         descr = CD(
             'TIM channel setup',
             [
                 ( 'ccm', 'Compare / Capture mode', CCM, {}, {'update':True} ),
-                ( 'psc', 'Prescaler', PSC, { 'ccm':CCM.revlp('Capture') } ),
+                ( 'psc', 'Prescaler', 'ENUM', { 'ccm': 'Capture*' } ), # TODO: expr?
                 #( 'filter', 'Sampling frequency' ),
                 # TODO: filter frequency widget ?
-                ( 'fast', 'Fast', BF(), { 'ccm':OM('Output') } ),
-                ( 'preload', 'Preload', BF(), { 'ccm':OM('Output') } ),
-                ( 'om', 'Output mode', OM, {}, { 'ccm':OM('Output') } ),
-                ( 'clear', 'Clear on ETRF', BF(), { 'ccm':OM('Output') }  )
+                ( 'fast', 'Fast', BF(), { 'ccm':'Output' } ),
+                ( 'preload', 'Preload', BF(), { 'ccm':'Output' } ),
+                ( 'out_mode', 'Output mode', 'ENUM', {}, { 'ccm':'Output' } ),
+                ( 'clear', 'Clear on ETRF', BF(), { 'ccm':'Output' }  )
             ]
         )
+        enums=enum_map(
+            ccm= enum('Output', 'Capture TI1', 'Capture TI2', 'Capture TRC'),
+            psc= enum(1, 2, 4, 8),
+            out_mode= enum('frozen', '1 on match', '0 on match', 'Toggle on match',
+                'force 0', 'force 1', '1 <- cnt<ccr', '1 <- cnt>ccr')
+        )
 
-# class tim(config_parent):
-    # /
-#"""
+class tim(config_parent):
+
+    @gen_func()
+    @setup_params()
+    def gen_setup( s ):
+        P = s.get_arg_f()
+        ccmr = {}
+        ccer = {}
+        for e in s.child_order:
+            e = getattr( s, e )
+            e.setup_regs( ccmr, ccer )
+        print(ccmr, ccer)
+        s.clk_start()
+        """cr = {
+            'CEN': ,
+            'UDIS': ,
+            'URS': ,
+            'OPM': ,
+            'DIR': ,
+            'CMS': ,
+            'ARPE': ,
+            'CKD': ,
+            'CCPC': ,
+            'CCUS': ,
+            'CCDS': ,
+            'MMS': ,
+            'TI1S': ,
+            '': ,
+        } # """
+        s.wctx().cperiph(s.pname(),
+                    CCMR=ccmr,
+                    CCER=bsrr )
+
+    def pname( s ):
+        return 'TIM'+s.id
+    def clk_name( s ):
+        return 'TIM'+s.id
+
+    descr = CD(
+        'Timer setup', [
+            ( '_fcfg_gen_setup', 'Generate setup', FS() ),
+        ]
+    )
 
 """
 p1 = gpio_pin()

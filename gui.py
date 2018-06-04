@@ -21,9 +21,18 @@ ld_base = {
 ld_base_r = dict( tuple(reversed(i))
                 for i in ld_base.items() )
 
+def set_multi(d, p, **dt):
+    for k, v in dt.items():
+        d[p+k] = v
+
 def flush_children( o ):
     for i in o.get_children():
         o.remove( i )
+
+def flush_boxes( o ):
+    for i in o.get_children():
+        if isinstance( i, Gtk.Box ):
+            o.remove( i )
 
 def _xml_store( fl, e ):
     for n,v in fl:
@@ -385,6 +394,8 @@ class link_path: # TODO: move to config_parent ?
         # except AttributeError:
             # raise LookupError( 'no path \'{}\''.format( l ) )
 
+    # TODO: find with *
+
     def get( s, l ):
         try:
             t = l.split( '/' )
@@ -462,7 +473,7 @@ class link_path: # TODO: move to config_parent ?
 
     def get_obj_list( s, l, t ):
         return [ ( n, i.n ) for n,i in s.get(l).__dict__.items()
-                if i.__class__.__name__.startswith( t ) ]
+                if i.cname().startswith( t ) ]
 
     def get_path( s ):
         try:
@@ -504,8 +515,8 @@ def gen_checkbox(v, cbk, name=''):
     cb.connect('clicked', change_checkbox_cb, cbk)
     return cb
 
-def new_window(tp=Gtk.Window, **a):
-    w = tp(**a)
+def new_window(wc=Gtk.Window, **a):
+    w = wc(**a)
     w.connect('action', lambda w,f,v: f(v))
     return w
 
@@ -769,8 +780,11 @@ class config_parent( link_path, xml_storable ):
             setattr( r, n, o )
         return r
 
+    def cname( s ):
+        return s.__class__.__name__
+
     def default_name( s, o=None ):
-        n = s.__class__.__name__
+        n = s.cname()
         if not o: return n
         n += '_'
         i = 1
@@ -783,7 +797,7 @@ class config_parent( link_path, xml_storable ):
 
     # returns loaded config
     def load_cfg( s, n ):
-        return s.get_cfg( 'import_cfg' )( n )
+        return s.get_cfg( 'import_cfg' )( s.cname()+'_'+n )
 
     def child_reconfig( s, c, n=None ):
         if isinstance( c, str ):
@@ -793,7 +807,7 @@ class config_parent( link_path, xml_storable ):
         try:
             v = getattr( s, n )
             if v.__class__ is c.__class__: # FIXME: must be strict comparison ?
-                v.reconfigure( c )
+                v._reconfig( c )
             else:
                 raise AttributeError # copy obj in except
         except AttributeError:
@@ -806,12 +820,17 @@ class config_parent( link_path, xml_storable ):
                 pass
 
     def reconfigure( s, c ):
+        if isinstance( c, str ):
+            c = s.load_cfg( c )
+        s._reconfig( c )
+
+    def _reconfig( s, c ):
         for n,i in c.__dict__.items():
             if not n.startswith( '_' ):
                 try:
                     v = getattr( s, n )
                     if v.__class__ is i.__class__:
-                        v.reconfigure( i )
+                        v._reconfig( i )
                     else:
                         setattr( s, n, i )
                 except AttributeError:
@@ -824,10 +843,7 @@ class config_parent( link_path, xml_storable ):
                 e.add( s.show() )
                 e.show_all()
         else:
-            #flush_children( e )
-            for i in e.get_children():
-                if isinstance( i, Gtk.Box ):
-                    e.remove( i )
+            flush_boxes( e )
 
     def iv_drag_recv( s, iv, ctx, x, y, sel, info, tm ):
         p, m = iv.get_dest_item_at_pos( x, y )
@@ -923,7 +939,7 @@ class config_parent( link_path, xml_storable ):
             vd[vn] = {'pb':r, 'p':p, 'pv':pv}
             return r
         except KeyError:
-            print('No render {} for {} object'.format(vn,s.__class__.__name__))
+            print('No render {} for {} object'.format(vn,s.cname()))
             return None
 
     def render_tree( s, pb=None, sel_cb=None, act_cb=None ):
@@ -1075,7 +1091,7 @@ class link( xml_storable ):
             s._p.link_reconfigure( s._l, c ) # TODO: what if exists ?
         except AttributeError:
             pass
-    def reconfigure( s, c ): # TODO: configure action/rules
+    def _reconfig( s, c ): # TODO: configure action/rules
         l = s._l
         if hasattr( c, 'cfg_name' ):
             c = s._p.load_cfg( c.cfg_name )
@@ -1183,7 +1199,7 @@ class objsel_setup:
         sel_o = fo._p.get( s.l )
         l = []
         for n,i in sel_o.__dict__.items():
-            if i.__class__.__name__.startswith( s.cn ) and not n.startswith( '_' ):
+            if i.cname().startswith( s.cn ) and not n.startswith( '_' ):
                 l.append( ( i.n, n ) )
         b.add( gen_combo( l, *vset_cb( fo, '_s', cb ) ) )
         try:
