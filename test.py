@@ -9,7 +9,6 @@ pc = stm.processor()
 p2 = stm.gpio_pin()
 p2.n='p6'
 p2.test_freq2 = 8e6
-p2.reconfigure('afio')
 p = stm.gpio_pin()
 p.n='p5'
 p.num = 5
@@ -36,6 +35,8 @@ gp.p2 = p2
 pc.n = 'procek_xd'
 pc.gp = gp
 pc.fix_parent()
+
+p.reconfigure('afio')
 
 w = p2.show_window() #"""
 w.show_all()

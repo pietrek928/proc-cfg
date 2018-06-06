@@ -8,17 +8,17 @@ from periph_class import proc_cfg
 
 class processor( config_parent ):
     proc_cfg = None
-    def write_start( s ):
-        s.clks = []
-        s.psets = {}
-        s._wctx = write_ctx(s.proc_cfg, )
-    def get_mode( s, n ):
-        return mode_obj()
     def __init__( s ):
-        s.clr()
+        # s.clr()
         s.descr_t = {}
         s.modes = {}
         s._imp_ch = {}
+    def write_start( s ):
+        s.clks = []
+        s.psets = {}
+        s._wctx = write_ctx(s.proc_cfg)
+    def get_mode( s, n ):
+        return mode_obj()
     def wctx( s ):
         return write_ctx( s.get_periph )
     def import_cfg( s, n ):

@@ -1109,7 +1109,7 @@ class link( xml_storable ):
         try:
             s._l = e.attrib[ 'l' ]
             s._s = e.attrib[ 's' ]
-        except AttributeError:
+        except KeyError:
             pass
 
 class freq( link ):
@@ -1199,8 +1199,11 @@ class objsel_setup:
         sel_o = fo._p.get( s.l )
         l = []
         for n,i in sel_o.__dict__.items():
-            if i.cname().startswith( s.cn ) and not n.startswith( '_' ):
-                l.append( ( i.n, n ) )
+            try:
+                if i.cname().startswith( s.cn ) and not n.startswith( '_' ):
+                    l.append( ( i.n, n ) )
+            except AttributeError:
+                pass
         b.add( gen_combo( l, *vset_cb( fo, '_s', cb ) ) )
         try:
             fo._l = s.l+'/'+fo._s

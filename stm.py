@@ -23,6 +23,11 @@ class processor( processor ):
     proc_cfg = load_proc_cfg( cm=modules[__name__], cfg_dir='periph_config/'+model, f='periph_config/{}.xml'.format(model), pcfg=parent_cfg )
     get_periph = proc_cfg.get_periph
 
+    def __init__( s ):
+        super().__init__()
+        s.clr()
+        s.descr_t = {}
+        s.modes = {}
     def write_start( s ):
         s.clks = [] # TODO: as cache ?
         s.psets = {}
@@ -30,10 +35,6 @@ class processor( processor ):
         return mode_obj()
     def gen_code( s, wctx, f, *args, **vargs ):
         pass
-    def __init__( s ):
-        s.clr()
-        s.descr_t = {}
-        s.modes = {}
     def clr( s ):
         s.periph_data = {}
         s.types = {}
