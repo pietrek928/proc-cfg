@@ -1,0 +1,1 @@
+<p _="gpio_pin" m="afio" n="p5" out_mode="push-pull"><num _="i" v="5" /><test_freq2 _="f" v="8000000.0" /><en _="b" v="True" /><tiles _="b" v="True" /><tiles_edit _="b" v="True" /><spd _="i" v="2" /><test_freq _="freq" l="." /><test_sel _="link" l="." /><child_order _="list" l="test_sel" /></p>
